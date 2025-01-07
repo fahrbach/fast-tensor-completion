@@ -1,37 +1,40 @@
 import matplotlib.pyplot as plt
 import tensorly as tl
 import numpy as np
+import time
 
 import matplotlib as mpl
 
 from scipy.misc import face
 from scipy.ndimage import zoom
 
-def to_image(tensor):
-    """A convenience function to convert from a float dtype back to uint8"""
-    im = tl.to_numpy(tensor)
-    im -= im.min()
-    im /= im.max()
-    im *= 255
-    return im.astype(np.uint8)
-
 """
 TODO:
 - Make train/test index notation better
 - Comment `run_cp_completion` function
-- Create GitHub repo
-- Add timer + preliminary runtime plot
-- Add L2 regularization param
 """
+
+# Tensor data methods
+
+def get_image_tensor():
+    return tl.tensor(zoom(face(), (0.3, 0.3, 1)), dtype="float64")
+
+
+def get_random_cp_tensor(shape, rank, random_state=1234):
+    return tl.random.random_cp(shape, rank, full=True, random_state=random_state)
+
+
+# Tensor utils 
 
 def tensor_index_to_vec_index(tensor_index, shape):
     return np.ravel_multi_index(tensor_index, shape)
 
+
 def vec_index_to_tensor_index(vec_index, shape):
     return np.unravel_index(vec_index, shape)
 
-def solve_least_squares(A, b):
-    return np.linalg.pinv(A.T @ A) @ (A.T @ b)
+
+# CP completion
 
 def cp_loss(factors, X, observation_indices):
     rank = factors[0].shape[1]
@@ -53,9 +56,16 @@ def cp_loss(factors, X, observation_indices):
     loss /= num_samples
     return loss
 
-def run_cp_completion(X, observation_indices, rank, num_iterations, test_indices=None, seed=0):
-    np.random.seed(seed)
 
+def solve_least_squares(A, b, l2_regularization_strength=0.0):
+    d = A.shape[1]
+    return np.linalg.pinv(A.T @ A + l2_regularization_strength * np.identity(d)) @ (A.T @ b)
+
+
+def run_cp_completion(X, observation_indices, rank, num_iterations, test_indices=None, seed=0):
+    start_time = time.time()
+
+    np.random.seed(seed)
     factors = [np.random.normal(0, 1, size=(X.shape[n], rank)) for n in range(X.ndim)]
 
     loss = cp_loss(factors, X, observation_indices)
@@ -64,27 +74,27 @@ def run_cp_completion(X, observation_indices, rank, num_iterations, test_indices
     loss_test = cp_loss(factors, X, test_indices)
     losses_test = [loss_test]
 
-    for iteration in range(num_iterations):
-        # CP completion (need to partition indices on each dimension?)
-        for n in range(X.ndim):
-            partitioned_indices = [[] for _ in range(X.shape[n])]
-            for vec_index in observation_indices:
-                tensor_index = vec_index_to_tensor_index(vec_index, X.shape)
-                partitioned_indices[tensor_index[n]].append(vec_index)
+    # Precompute how indices are partitioned.
+    # CP completion (need to partition indices on each dimension?)
+    partitioned_indices = [[] for _ in range(X.ndim)]
+    for n in range(X.ndim):
+        partitioned_indices[n] = [[] for _ in range(X.shape[n])]
+        for vec_index in observation_indices:
+            tensor_index = vec_index_to_tensor_index(vec_index, X.shape)
+            partitioned_indices[n][tensor_index[n]].append(vec_index)
 
+    for iteration in range(num_iterations):
+        for n in range(X.ndim):
             # Solve each row of A^{(n)} independently.
             for i in range(X.shape[n]):
-                #print(i, partitioned_indices[i])
-                num_samples = len(partitioned_indices[i])
+                num_samples = len(partitioned_indices[n][i])
                 if num_samples == 0:
                     continue
                 design_matrix = np.ones((num_samples, rank))
-                #print(design_matrix)
                 response = np.zeros(num_samples)
                 for j in range(num_samples):
-                    vec_index = partitioned_indices[i][j]
+                    vec_index = partitioned_indices[n][i][j]
                     tensor_index = vec_index_to_tensor_index(vec_index, X.shape)
-                    #print(' -', tensor_index)
                     for d in range(X.ndim):
                         if d == n:
                             continue
@@ -92,12 +102,8 @@ def run_cp_completion(X, observation_indices, rank, num_iterations, test_indices
                         design_matrix[j] = np.multiply(design_matrix[j], factor_row)
                     response[j] = X[tensor_index]
 
-                #print(design_matrix)
-                #print(response)
                 x = solve_least_squares(design_matrix, response)
-                #print(x)
                 factors[n][i] = x
-                #print()
 
             loss = cp_loss(factors, X, observation_indices)
             losses.append(loss)
@@ -105,61 +111,82 @@ def run_cp_completion(X, observation_indices, rank, num_iterations, test_indices
             loss_test = cp_loss(factors, X, test_indices)
             losses_test.append(loss_test)
 
-    return factors, losses, losses_test
+    end_time = time.time()
+    solve_time = end_time - start_time
+
+    return factors, losses, losses_test, solve_time
+
 
 def main():
     SEED = 0
-    NUM_OBSERVATIONS = 1000
-    NUM_ITERATIONS = 20
+    SAMPLE_RATIO = 0.01
+    NUM_ITERATIONS = 10
 
     np.random.seed(SEED)
     colors = mpl.colormaps['tab10'].colors
 
-    # Get image tensor
-    image = face()
-    image = tl.tensor(zoom(face(), (0.3, 0.3, 1)), dtype="float64")
-
-    X = image
+    #X = get_image_tensor()
+    X = get_random_cp_tensor(shape=(100, 100, 100), rank=16)
     print('X.shape:', X.shape)
-    X_vec = tl.tensor_to_vec(X)
-    indices = np.random.permutation(np.arange(X.size))
-    train_indices = indices[:NUM_OBSERVATIONS]
-    test_indices = indices[-10000:]
+    print('X.size:', X.size)
 
-    print('% observations:', NUM_OBSERVATIONS / X.size)
+    # Create test and train dataset.
+    shuffled_indices = np.random.permutation(np.arange(X.size))
+    num_samples_train = int(SAMPLE_RATIO * X.size)
+    print('sample_ratio:', SAMPLE_RATIO)
+    print('num_samples:', num_samples_train)
+    train_indices = shuffled_indices[:num_samples_train]
+    num_samples_test = int(0.1 * X.size)
+    test_indices = shuffled_indices[-num_samples_test:]  # Use last 10% of shuffled indices.
 
     # Rank sweep
-    for rank in range(1, 4 + 1):
-        print('rank:', rank)
-        factors, losses, losses_test = run_cp_completion(X, train_indices, rank, NUM_ITERATIONS, test_indices)
-        plt.plot(losses, label='rank: ' + str(rank), c=colors[rank-1])
-        plt.plot(losses_test, linestyle='dashed', c=colors[rank-1]) 
+    if False:
+        for i, rank in enumerate([1, 2, 4, 8, 16]):
+            print('solving rank:', rank)
+            factors, losses, losses_test, solve_time = run_cp_completion(X, train_indices, rank, NUM_ITERATIONS, test_indices)
+            plt.plot(losses, label='rank: ' + str(rank), c=colors[i])
+            plt.plot(losses_test, linestyle='dashed', c=colors[i]) 
+            print(rank, losses[-1], losses_test[-1], solve_time)
 
-    plt.xlabel('step')
-    plt.ylabel('loss')
-    plt.title('CP completion')
-    plt.yscale('log')
-    plt.grid()
-    plt.legend()
-    plt.show()
+        plt.xlabel('step')
+        plt.ylabel('loss')
+        plt.title('CP completion (sample_ratio: ' + str(SAMPLE_RATIO) + ')')
+        plt.yscale('log')
+        plt.grid()
+        plt.legend()
+        plt.show()
 
-    # Sweep over # samples
-    rank = 4
-    for i, ratio in enumerate([0.01, 0.02, 0.03, 0.04, 0.05]):
-        num_samples = int(X.size * ratio)
-        print('ratio:', ratio, 'num_samples:', num_samples)
-        train_indices = indices[:num_samples]
-        factors, losses, losses_test = run_cp_completion(X, train_indices, rank, NUM_ITERATIONS, test_indices)
+    # Sweep over sample ratio
+    if True:
+        rank = 4
 
-        plt.plot(losses, label='num_samples: ' + str(ratio), c=colors[i])
-        plt.plot(losses_test, linestyle='dashed', c=colors[i])
+        #sample_ratios = [0.01, 0.02, 0.03, 0.04, 0.05]
+        sample_ratios = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
+        running_times = []
+        for i, ratio in enumerate(sample_ratios):
+            num_samples = int(X.size * ratio)
+            print('ratio:', ratio, 'num_samples:', num_samples)
+            train_indices = shuffled_indices[:num_samples]
+            factors, losses, losses_test, solve_time = run_cp_completion(X, train_indices, rank, NUM_ITERATIONS, test_indices)
+            running_times.append(solve_time)
+            print(rank, losses[-1], losses_test[-1], solve_time)
 
-    plt.xlabel('step')
-    plt.ylabel('loss')
-    plt.title('CP completion (rank=4)')
-    plt.yscale('log')
-    plt.grid()
-    plt.legend()
-    plt.show()
+            plt.plot(losses, label='num_samples: ' + str(ratio), c=colors[i])
+            plt.plot(losses_test, linestyle='dashed', c=colors[i])
+
+        plt.xlabel('step')
+        plt.ylabel('loss')
+        plt.title('CP completion (rank=4)')
+        plt.yscale('log')
+        plt.grid()
+        plt.legend()
+        plt.show()
+
+        plt.xlabel('sample_ratios')
+        plt.ylabel('solve times (s)')
+        plt.title('CP completion (rank=4)')
+        plt.grid()
+        plt.plot(sample_ratios, running_times, marker='.')
+        plt.show()
 
 main()

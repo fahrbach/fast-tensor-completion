@@ -10,11 +10,19 @@ import time
 class CpCompletionSolveResult:
     date: str = datetime.datetime.now().isoformat()
 
+    sample_ratio: float = None
     rank: int = None
+    seed: int = None
+
+    # Instance-level info
+    input_shape: list[int] = None
+    num_train_samples: int = None
+    num_test_samples: int = None
 
     train_losses: list[float] = None
     test_losses: list[float] = None
     step_times_seconds: list[float] = None
+
 
 def write_dataclass_to_file(dataclass, filename):
     """
@@ -24,6 +32,29 @@ def write_dataclass_to_file(dataclass, filename):
         for field in dataclasses.fields(dataclass):
             f.write(str(field.name) + ' ')
             f.write(str(getattr(dataclass, field.name)) + '\n')
+
+
+def read_cp_completion_solve_result_from_file(filename):
+    """
+    Reads `filename` and constructs the `CpCompletionSolveResult` data.
+    """
+    assert os.path.exists(filename)
+    solve_result = CpCompletionSolveResult()
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+        assert len(lines) == len(dataclasses.fields(solve_result))
+        for line in lines:
+            line = line.strip()
+            tokens = line.split()
+            assert len(tokens) >= 2
+            key = tokens[0]
+            value_str = ' '.join(tokens[1:])
+            value = value_str
+            # Update numeric values to not be strings.
+            if key not in ['date']:
+                value = eval(value_str)
+            setattr(solve_result, key, value)
+    return solve_result
 
 
 def tensor_index_to_vec_index(tensor_index, shape):
@@ -64,22 +95,43 @@ def solve_least_squares(A, b, l2_regularization=0.0):
     d = A.shape[1]
     return np.linalg.pinv(A.T @ A + l2_regularization * np.identity(d)) @ (A.T @ b)
 
+
+def get_train_and_test_data(X, sample_ratio):
+    DATA_SEED = 0
+    TEST_RATIO = 0.1  # Use last 10% of shuffled indices.
+    np.random.seed(DATA_SEED)
+    shuffled_indices = np.random.permutation(np.arange(X.size))
+    num_train_samples = int(sample_ratio * X.size)
+    print('sample_ratio:', sample_ratio)
+    print('num_train_samples:', num_train_samples)
+    train_indices = shuffled_indices[:num_train_samples]
+    num_test_samples = int(TEST_RATIO * X.size)
+    test_indices = shuffled_indices[-num_test_samples:]  
+    return train_indices, test_indices
+
 """
 TODO:
     - Change arguments to run_cp_completion(X, sample_ratio, rank, output_path, trial)
-      * create train and test data in function from SEED = 0
-      * move sample_ratio into filename
       * annotate result file w/ {train, test} sample ratio
 """
-def run_cp_completion(X, train_indices, rank, output_path, num_iterations, test_indices=None, seed=0):
+def run_cp_completion(X, sample_ratio, rank, output_path, num_iterations, seed=0):
     assert output_path[-1] == '/'
 
     # Check if the solve result has been cached.
     output_path += 'cp-completion/'
     filename = output_path
+    filename += 'sample_ratio-' + str(sample_ratio) + '_'
     filename += 'rank-' + str(rank) + '_'
     filename += 'seed-' + str(seed)
     filename += '.txt'
+
+    if os.path.exists(filename):
+        print('cache hit for:', filename)
+        solve_result = read_cp_completion_solve_result_from_file(filename)
+        print(solve_result)
+        return solve_result
+
+    train_indices, test_indices = get_train_and_test_data(X, sample_ratio)
 
     train_losses = []
     test_losses = []
@@ -142,7 +194,11 @@ def run_cp_completion(X, train_indices, rank, output_path, num_iterations, test_
     assert len(train_losses) == len(running_times)
 
     solve_result = CpCompletionSolveResult()
+
+    solve_result.sample_ratio = sample_ratio
     solve_result.rank = rank
+    solve_result.seed = seed
+
     solve_result.train_losses = train_losses
     solve_result.test_losses = test_losses
     solve_result.step_times_seconds = running_times

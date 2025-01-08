@@ -10,16 +10,12 @@ import time
 
 """
 TODO:
-    - Use CpCompletionOutput data class
-    - Cache solve outputs
     - Add verbose option for each solve
 """
 def main():
-    SEED = 0
     SAMPLE_RATIO = 0.01
     NUM_ITERATIONS = 10
 
-    np.random.seed(SEED)
     colors = mpl.colormaps['tab10'].colors
 
     data_manager = TensorDataManager()
@@ -31,21 +27,12 @@ def main():
     print('X.size:', X.size)
     print(data_manager.output_path)
 
-    # Create train and test data.
-    shuffled_indices = np.random.permutation(np.arange(X.size))
-    num_train_samples = int(SAMPLE_RATIO * X.size)
-    print('sample_ratio:', SAMPLE_RATIO)
-    print('num_train_samples:', num_train_samples)
-    train_indices = shuffled_indices[:num_train_samples]
-    num_test_samples = int(0.1 * X.size)
-    test_indices = shuffled_indices[-num_test_samples:]  # Use last 10% of shuffled indices.
-
     # Rank sweep
     if True:
         for i, rank in enumerate([1, 2, 4, 8, 16]):
             print('solving rank:', rank)
 
-            solve_result = run_cp_completion(X, train_indices, rank, output_path, NUM_ITERATIONS, test_indices)
+            solve_result = run_cp_completion(X, SAMPLE_RATIO, rank, output_path, NUM_ITERATIONS)
 
             train_losses = solve_result.train_losses
             test_losses = solve_result.test_losses
@@ -69,12 +56,11 @@ def main():
         sample_ratios = [0.01, 0.02, 0.03, 0.04, 0.05]
         #sample_ratios = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
         all_running_times = []
-        for i, ratio in enumerate(sample_ratios):
-            num_train_samples = int(X.size * ratio)
-            print('ratio:', ratio, 'num_train_samples:', num_train_samples)
-            train_indices = shuffled_indices[:num_train_samples]
+        for i, sample_ratio in enumerate(sample_ratios):
+            num_train_samples = int(X.size * sample_ratio)
+            print('sample_ratio:', sample_ratio, 'num_train_samples:', num_train_samples)
 
-            solve_result = run_cp_completion(X, train_indices, rank, output_path, NUM_ITERATIONS, test_indices)
+            solve_result = run_cp_completion(X, sample_ratio, rank, output_path, NUM_ITERATIONS)
 
             train_losses = solve_result.train_losses
             test_losses = solve_result.test_losses
@@ -83,7 +69,7 @@ def main():
             all_running_times.append(total_solve_time)
             print(rank, train_losses[-1], test_losses[-1], total_solve_time)
 
-            plt.plot(train_losses, label='num_samples: ' + str(ratio), c=colors[i])
+            plt.plot(train_losses, label='ratio: ' + str(sample_ratio), c=colors[i])
             plt.plot(test_losses, linestyle='dashed', c=colors[i])
 
         plt.xlabel('step')

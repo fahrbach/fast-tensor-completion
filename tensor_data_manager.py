@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.io as sio
 import tensorly as tl
 
 
@@ -33,5 +34,26 @@ class TensorDataManager:
         self.output_path += 'shape-' + '-'.join([str(x) for x in shape]) + '_'
         self.output_path += 'rank-' + '-'.join([str(x) for x in rank]) + '_'
         self.output_path += 'seed-' + str(seed) + '/'
+        return self.tensor
+
+
+    def load_cardiac_mri(self):
+        self.input_filename = 'data/cardiac-mri/sol_yxzt_pat1.mat'
+        self.tensor = sio.loadmat(self.input_filename)['sol_yxzt'].astype(float)
+        self.output_path = 'output/cardiac-mri/'
+        assert self.tensor.shape == (256, 256, 14, 20)
+        assert self.tensor.size == 18_350_080
+        return self.tensor
+
+
+    def load_hyperspectral(self):
+        """
+        https://personalpages.manchester.ac.uk/staff/d.h.foster/Time-Lapse_HSIs/nogueiro/nogueiro_1140.zip
+        """
+        self.input_filename = 'data/hyperspectral/nogueiro_1140.mat'
+        self.tensor = sio.loadmat(self.input_filename)['hsi'].astype(float)
+        self.output_path = 'output/hyperspectral/'
+        assert self.tensor.shape == (1024, 1344, 33)
+        assert self.tensor.size == 45_416_448
         return self.tensor
 

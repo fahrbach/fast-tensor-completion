@@ -114,8 +114,9 @@ def get_train_and_test_data(X, sample_ratio):
     test_indices = shuffled_indices[-num_test_samples:]  
     return train_indices, test_indices
 
+
 def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
-    NUM_ITERATIONS = 20
+    NUM_ITERATIONS = 10
 
     assert output_path[-1] == '/'
 
@@ -189,6 +190,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
 
             loss = compute_cp_loss(factors, X, train_indices)
             train_losses.append(loss)
+            print(' - (iteration, n):', (iteration, n), '->', loss)
             loss = compute_cp_loss(factors, X, test_indices)
             test_losses.append(loss)
 

@@ -1,31 +1,19 @@
-import matplotlib.pyplot as plt
-import tensorly as tl
-import numpy as np
-import time
+from tensor_data_manager import TensorDataManager
 
 import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+import tensorly as tl
 
-from scipy.misc import face
-from scipy.ndimage import zoom
+import time
 
 """
 TODO:
-    - Use TensorDataHandler class
     - Use CpCompletionOutput data class
     - Cache solve outputs
     - Add verbose option for each solve
     - Refactor into [tensor_data_handler.py, tensor_utils.py, cp_completion_solvers.py]
 """
-
-# Tensor data methods
-
-def get_image_tensor():
-    return tl.tensor(zoom(face(), (0.3, 0.3, 1)), dtype="float64")
-
-
-def get_random_cp_tensor(shape, rank, random_state=1234):
-    return tl.random.random_cp(shape, rank, full=True, random_state=random_state)
-
 
 # Tensor utils 
 
@@ -140,10 +128,13 @@ def main():
     np.random.seed(SEED)
     colors = mpl.colormaps['tab10'].colors
 
-    #X = get_image_tensor()
-    X = get_random_cp_tensor(shape=(100, 100, 100), rank=16)
+    data_manager = TensorDataManager()
+    X = data_manager.generate_random_normal(shape=(100, 100, 100))
+    #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=16)
+    #X = data_manager.generate_random_tucker(shape=(100, 100, 100), rank=(4, 4, 4))
     print('X.shape:', X.shape)
     print('X.size:', X.size)
+    print(data_manager.output_path)
 
     # Create train and test data.
     shuffled_indices = np.random.permutation(np.arange(X.size))

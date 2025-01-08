@@ -11,10 +11,10 @@ import time
 """
 TODO:
     - Add verbose option for each solve
+    - Support L2 regularization
 """
 def main():
     SAMPLE_RATIO = 0.01
-    NUM_ITERATIONS = 10
 
     colors = mpl.colormaps['tab10'].colors
 
@@ -32,7 +32,7 @@ def main():
         for i, rank in enumerate([1, 2, 4, 8, 16]):
             print('solving rank:', rank)
 
-            solve_result = run_cp_completion(X, SAMPLE_RATIO, rank, output_path, NUM_ITERATIONS)
+            solve_result = run_cp_completion(X, SAMPLE_RATIO, rank, output_path)
 
             train_losses = solve_result.train_losses
             test_losses = solve_result.test_losses
@@ -60,7 +60,7 @@ def main():
             num_train_samples = int(X.size * sample_ratio)
             print('sample_ratio:', sample_ratio, 'num_train_samples:', num_train_samples)
 
-            solve_result = run_cp_completion(X, sample_ratio, rank, output_path, NUM_ITERATIONS)
+            solve_result = run_cp_completion(X, sample_ratio, rank, output_path)
 
             train_losses = solve_result.train_losses
             test_losses = solve_result.test_losses

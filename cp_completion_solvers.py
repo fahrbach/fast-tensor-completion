@@ -1,4 +1,5 @@
 import numpy as np
+import tensorly as tl
 
 import dataclasses
 import datetime
@@ -14,10 +15,14 @@ class CpCompletionSolveResult:
     rank: int = None
     seed: int = None
 
-    # Instance-level info
+    # Instance-level info.
     input_shape: list[int] = None
+    input_size: int = None
     num_train_samples: int = None
     num_test_samples: int = None
+
+    # Solver settings.
+    num_iterations: int = None
 
     train_losses: list[float] = None
     test_losses: list[float] = None
@@ -76,10 +81,10 @@ def compute_cp_loss(factors, X, indices):
     assert num_samples != 0
 
     loss = 0.0
-    for vec_index in indices:
+    for i, vec_index in enumerate(indices):
         tensor_index = vec_index_to_tensor_index(vec_index, X.shape)
         y = X[tensor_index]
-        
+ 
         tmp = np.ones(rank)
         for n in range(X.ndim):
             row = factors[n][tensor_index[n]]
@@ -109,12 +114,9 @@ def get_train_and_test_data(X, sample_ratio):
     test_indices = shuffled_indices[-num_test_samples:]  
     return train_indices, test_indices
 
-"""
-TODO:
-    - Change arguments to run_cp_completion(X, sample_ratio, rank, output_path, trial)
-      * annotate result file w/ {train, test} sample ratio
-"""
-def run_cp_completion(X, sample_ratio, rank, output_path, num_iterations, seed=0):
+def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
+    NUM_ITERATIONS = 20
+
     assert output_path[-1] == '/'
 
     # Check if the solve result has been cached.
@@ -126,10 +128,9 @@ def run_cp_completion(X, sample_ratio, rank, output_path, num_iterations, seed=0
     filename += '.txt'
 
     if os.path.exists(filename):
-        print('cache hit for:', filename)
-        solve_result = read_cp_completion_solve_result_from_file(filename)
-        print(solve_result)
-        return solve_result
+        result = read_cp_completion_solve_result_from_file(filename)
+        assert result.num_iterations >= NUM_ITERATIONS
+        return result
 
     train_indices, test_indices = get_train_and_test_data(X, sample_ratio)
 
@@ -158,8 +159,9 @@ def run_cp_completion(X, sample_ratio, rank, output_path, num_iterations, seed=0
     train_losses = [loss]
     loss = compute_cp_loss(factors, X, test_indices)
     test_losses = [loss]
-
-    for iteration in range(num_iterations):
+ 
+    # Alternating least squares
+    for iteration in range(NUM_ITERATIONS):
         for n in range(X.ndim):
             start_step_time = time.time()
             # Update each row of A^{(n)} independently.
@@ -193,18 +195,26 @@ def run_cp_completion(X, sample_ratio, rank, output_path, num_iterations, seed=0
     assert len(train_losses) == len(test_losses)
     assert len(train_losses) == len(running_times)
 
-    solve_result = CpCompletionSolveResult()
+    # Construct output
+    result = CpCompletionSolveResult()
 
-    solve_result.sample_ratio = sample_ratio
-    solve_result.rank = rank
-    solve_result.seed = seed
+    result.sample_ratio = sample_ratio
+    result.rank = rank
+    result.seed = seed
 
-    solve_result.train_losses = train_losses
-    solve_result.test_losses = test_losses
-    solve_result.step_times_seconds = running_times
+    result.input_shape = X.shape
+    result.input_size = X.size
+    result.num_train_samples = len(train_indices)
+    result.num_test_samples = len(train_indices)
+
+    result.num_iterations = NUM_ITERATIONS
+
+    result.train_losses = train_losses
+    result.test_losses = test_losses
+    result.step_times_seconds = running_times
 
     if not os.path.exists(output_path):
         os.makedirs(output_path)
-    write_dataclass_to_file(solve_result, filename)
-    return solve_result
+    write_dataclass_to_file(result, filename)
+    return result
 

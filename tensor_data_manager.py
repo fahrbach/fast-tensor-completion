@@ -1,11 +1,13 @@
 import numpy as np
 import tensorly as tl
 
+
 class TensorDataManager:
     def __init__(self):
         self.input_filename = None
         self.tensor = None
         self.output_path = None
+
 
     def generate_random_normal(self, shape, seed=1234):
         np.random.seed(seed)
@@ -15,6 +17,7 @@ class TensorDataManager:
         self.output_path += 'seed-' + str(seed) + '/'
         return self.tensor
 
+
     def generate_random_cp(self, shape, rank, seed=1234):
         self.tensor = tl.random.random_cp(shape, rank, full=True, random_state=seed) 
         self.output_path = 'output/random-cp_'
@@ -22,6 +25,7 @@ class TensorDataManager:
         self.output_path += 'rank-' + str(rank) + '_'
         self.output_path += 'seed-' + str(seed) + '/'
         return self.tensor
+
 
     def generate_random_tucker(self, shape, rank, seed=1234):
         self.tensor = tl.random.random_tucker(shape, rank, full=True, random_state=seed)

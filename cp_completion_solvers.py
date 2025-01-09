@@ -220,3 +220,75 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     write_dataclass_to_file(result, filename)
     return result
 
+
+def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
+    NUM_ITERATIONS = 10
+
+    train_indices, test_indices = get_train_and_test_data(X, sample_ratio)
+
+    np.random.seed(seed)
+    #factors = [np.zeros((X.shape[n], rank)) for n in range(X.ndim)]
+    factors = [np.random.normal(0, 1, size=(X.shape[n], rank)) for n in range(X.ndim)]
+    train_loss = compute_cp_loss(factors, X, train_indices)
+    print('train_loss:', train_loss)
+
+
+    train_losses = []
+    test_losses = []
+    running_times = []  # Ignores loss computations.
+
+    X_vec = tl.base.tensor_to_vec(X)
+    y_train = X_vec[train_indices]
+    y_test = X_vec[test_indices]
+
+    # TODO: Start from same initialization...
+    X_target_vec = np.zeros(X.size)
+
+    # Compute initial losses...
+    y_hat_train = X_target_vec[train_indices]
+    train_loss = np.sum((y_train - y_hat_train)**2) / len(train_indices)
+
+    y_hat_test = X_target_vec[test_indices]
+    test_loss = np.sum((y_test - y_hat_test)**2) / len(test_indices)
+    print(0, 'train_loss:', train_loss, 'test_loss:', test_loss)
+
+    for iteration in range(NUM_ITERATIONS):
+        X_target_vec[train_indices] = y_train
+        X_target = tl.base.vec_to_tensor(X_target_vec, X.shape)
+
+        # CP decomp for lifted problem
+        cp_decomp = tl.decomposition.parafac(X_target, rank, n_iter_max=100, verbose=0)
+        print(cp_decomp.factors[0])
+        X_target_vec = tl.cp_tensor.cp_to_vec(cp_decomp)
+
+        # Compute errors
+        y_hat_train = X_target_vec[train_indices]
+        train_loss = np.sum((y_train - y_hat_train)**2) / len(train_indices)
+
+        y_hat_test = X_target_vec[test_indices]
+        test_loss = np.sum((y_test - y_hat_test)**2) / len(test_indices)
+        print(iteration + 1, 'train_loss:', train_loss, 'test_loss:', test_loss)
+
+    assert len(train_losses) == len(test_losses)
+    assert len(train_losses) == len(running_times)
+
+    # Construct output
+    result = CpCompletionSolveResult()
+
+    result.sample_ratio = sample_ratio
+    result.rank = rank
+    result.seed = seed
+
+    result.input_shape = X.shape
+    result.input_size = X.size
+    result.num_train_samples = len(train_indices)
+    result.num_test_samples = len(train_indices)
+
+    result.num_iterations = NUM_ITERATIONS
+
+    result.train_losses = train_losses
+    result.test_losses = test_losses
+    result.step_times_seconds = running_times
+
+    return result
+

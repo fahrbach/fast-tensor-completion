@@ -223,51 +223,86 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
 
 def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     NUM_ITERATIONS = 10
+    NUM_RICHARDSON_ITERATIONS = 100
+
+    assert output_path[-1] == '/'
+
+    # Check if the solve result has been cached.
+    output_path += 'lifted-cp-completion/'
+    filename = output_path
+    filename += 'sample_ratio-' + str(sample_ratio) + '_'
+    filename += 'rank-' + str(rank) + '_'
+    filename += 'seed-' + str(seed)
+    filename += '.txt'
+
+    if os.path.exists(filename):
+        result = read_cp_completion_solve_result_from_file(filename)
+        assert result.num_iterations >= NUM_ITERATIONS
+        return result
 
     train_indices, test_indices = get_train_and_test_data(X, sample_ratio)
-
-    np.random.seed(seed)
-    #factors = [np.zeros((X.shape[n], rank)) for n in range(X.ndim)]
-    factors = [np.random.normal(0, 1, size=(X.shape[n], rank)) for n in range(X.ndim)]
-    train_loss = compute_cp_loss(factors, X, train_indices)
-    print('train_loss:', train_loss)
-
 
     train_losses = []
     test_losses = []
     running_times = []  # Ignores loss computations.
 
+    # Initialization.
+    init_start_time = time.time()
+
+    np.random.seed(seed)
+    factors = [np.random.normal(0, 1, size=(X.shape[n], rank)) for n in range(X.ndim)]
+    for i, factor in enumerate(factors):
+        print('factor', i, factor.shape)
+
     X_vec = tl.base.tensor_to_vec(X)
     y_train = X_vec[train_indices]
     y_test = X_vec[test_indices]
+    del X_vec
 
-    # TODO: Start from same initialization...
-    X_target_vec = np.zeros(X.size)
+    init_duration = time.time() - init_start_time
+    running_times.append(init_duration)
 
-    # Compute initial losses...
-    y_hat_train = X_target_vec[train_indices]
-    train_loss = np.sum((y_train - y_hat_train)**2) / len(train_indices)
+    train_loss = compute_cp_loss(factors, X, train_indices)
+    train_losses = [train_loss]
+    test_loss = compute_cp_loss(factors, X, test_indices)
+    test_losses = [test_loss]
+    print('0: train_loss:', train_loss, 'test_loss:', test_loss)
 
-    y_hat_test = X_target_vec[test_indices]
-    test_loss = np.sum((y_test - y_hat_test)**2) / len(test_indices)
-    print(0, 'train_loss:', train_loss, 'test_loss:', test_loss)
-
+    # Alternating least squares
     for iteration in range(NUM_ITERATIONS):
-        X_target_vec[train_indices] = y_train
-        X_target = tl.base.vec_to_tensor(X_target_vec, X.shape)
+        for n in range(X.ndim):
+            start_step_time = time.time()
 
-        # CP decomp for lifted problem
-        cp_decomp = tl.decomposition.parafac(X_target, rank, n_iter_max=100, verbose=0)
-        print(cp_decomp.factors[0])
-        X_target_vec = tl.cp_tensor.cp_to_vec(cp_decomp)
+            #print(' # dimension:', n)
 
-        # Compute errors
-        y_hat_train = X_target_vec[train_indices]
-        train_loss = np.sum((y_train - y_hat_train)**2) / len(train_indices)
+            design_matrix = tl.tenalg.khatri_rao(factors, skip_matrix=n)
+            tmp = np.linalg.pinv(design_matrix.T @ design_matrix)
+            #print(' * design_matrix.shape', design_matrix.shape)
+ 
+            for j in range(NUM_RICHARDSON_ITERATIONS):
+                y_vec = tl.tenalg.khatri_rao(factors).sum(axis=1)
+                y_vec[train_indices] = y_train
+                #print(' * y_vec.shape:', y_vec.shape)
+                Y = tl.base.vec_to_tensor(y_vec, X.shape)
+                #print(' * Y.shape:', Y.shape)
+                Y_unfolded_n = tl.base.unfold(Y, n)
+                #print(' * Y_unfolded_n.shape:', Y_unfolded_n.shape)
+                #print(' * factors[n].shape:', factors[n].shape)
 
-        y_hat_test = X_target_vec[test_indices]
-        test_loss = np.sum((y_test - y_hat_test)**2) / len(test_indices)
-        print(iteration + 1, 'train_loss:', train_loss, 'test_loss:', test_loss)
+                # Structured solve step?
+                tmp2 = design_matrix.T @ Y_unfolded_n.T
+                sol = tmp @ tmp2
+                #print(' *', tmp.shape, tmp2.shape, sol.shape, factors[n].shape)
+                factors[n] = sol.T
+
+            step_duration = time.time() - start_step_time
+            running_times.append(step_duration)
+
+            loss = compute_cp_loss(factors, X, train_indices)
+            train_losses.append(loss)
+            print(' - (iteration, n):', (iteration, n), '->', loss)
+            loss = compute_cp_loss(factors, X, test_indices)
+            test_losses.append(loss)
 
     assert len(train_losses) == len(test_losses)
     assert len(train_losses) == len(running_times)
@@ -290,5 +325,8 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     result.test_losses = test_losses
     result.step_times_seconds = running_times
 
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+    write_dataclass_to_file(result, filename)
     return result
 

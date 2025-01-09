@@ -32,7 +32,11 @@ def main():
 
     sample_ratio = 0.01
     rank = 8
+
+    print('============ lifted ==========')
     result = run_lifted_cp_completion(X, sample_ratio, rank, output_path)
+    print('train_losses:', result.train_losses)
+    print('test_losses:', result.test_losses)
     print('============ direct ==========')
     result = run_cp_completion(X, sample_ratio, rank, output_path)
     print('train_losses:', result.train_losses)

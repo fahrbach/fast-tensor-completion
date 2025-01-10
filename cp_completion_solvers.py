@@ -6,6 +6,11 @@ import datetime
 import os
 import time
 
+# Globals
+USE_CACHING = False
+L2_REGULARIZATION_STRENGTH = 0 #1e-6
+NUM_ITERATIONS = 10
+
 
 @dataclasses.dataclass
 class CpCompletionSolveResult:
@@ -14,6 +19,7 @@ class CpCompletionSolveResult:
     sample_ratio: float = None
     rank: int = None
     seed: int = None
+    l2_regularization_strength: float = None
 
     # Instance-level info.
     input_shape: list[int] = None
@@ -70,40 +76,46 @@ def vec_index_to_tensor_index(vec_index, shape):
     return np.unravel_index(vec_index, shape)
 
 
+def cp_factors_to_cp_vec(factors):
+    return tl.tenalg.khatri_rao(factors).sum(axis=1)
+
+
 # TODO(fahrbach): Make faster. 90+% of solve time is spent in this function.
-# TODO(fahrbach): Decide if we want to include regularization in CP loss.
 def compute_cp_loss(factors, X, indices):
     """
     Returns the mean-squared error of the CP decomposition over `indices`.
     """
-    rank = factors[0].shape[1]
     num_samples = len(indices)
     assert num_samples != 0
 
-    loss = 0.0
-    for i, vec_index in enumerate(indices):
-        tensor_index = vec_index_to_tensor_index(vec_index, X.shape)
-        y = X[tensor_index]
- 
-        tmp = np.ones(rank)
-        for n in range(X.ndim):
-            row = factors[n][tensor_index[n]]
-            tmp = np.multiply(tmp, row)
-        y_hat = np.sum(tmp)
+    # Faster numpy compuation if evaluating on the entire tensor `X`.
+    if num_samples == X.size:
+        y_vec = tl.base.tensor_to_vec(X)
+        y_hat_vec = cp_factors_to_cp_vec(factors)
+        assert len(y_vec) == len(y_hat_vec)
+        tmp = np.sum((y_vec - y_hat_vec)**2)
+        mse = tmp / num_samples
+        rre = tmp / np.sum(y_vec**2)
+        return rre
 
-        loss += (y - y_hat)**2
-    loss /= num_samples
-    return loss
+    X_vec = tl.base.tensor_to_vec(X)
+    X_hat_vec = cp_factors_to_cp_vec(factors)
+    y_vec = X_vec[indices]
+    y_hat_vec = X_hat_vec[indices]
+    tmp = np.sum((y_vec - y_hat_vec)**2)
+    mse = tmp / num_samples
+    rre = tmp / np.sum(y_vec**2)
+    return rre
 
 
-def solve_least_squares(A, b, l2_regularization=0.0):
+def solve_least_squares(A, b, l2_regularization):
     d = A.shape[1]
     return np.linalg.pinv(A.T @ A + l2_regularization * np.identity(d)) @ (A.T @ b)
 
 
 def get_train_and_test_data(X, sample_ratio):
     DATA_SEED = 0
-    TEST_RATIO = 0.1  # Use last 10% of shuffled indices.
+    TEST_RATIO = 1.0 # 0.1  # Use last 10% of shuffled indices.
     np.random.seed(DATA_SEED)
     shuffled_indices = np.random.permutation(np.arange(X.size))
     num_train_samples = int(sample_ratio * X.size)
@@ -116,8 +128,6 @@ def get_train_and_test_data(X, sample_ratio):
 
 
 def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
-    NUM_ITERATIONS = 10
-
     assert output_path[-1] == '/'
 
     # Check if the solve result has been cached.
@@ -128,7 +138,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     filename += 'seed-' + str(seed)
     filename += '.txt'
 
-    if os.path.exists(filename):
+    if USE_CACHING and os.path.exists(filename):
         result = read_cp_completion_solve_result_from_file(filename)
         assert result.num_iterations >= NUM_ITERATIONS
         return result
@@ -143,7 +153,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     init_start_time = time.time()
 
     np.random.seed(seed)
-    factors = [np.random.normal(0, 1, size=(X.shape[n], rank)) for n in range(X.ndim)]
+    factors = [np.random.normal(0, 0.1, size=(X.shape[n], rank)) for n in range(X.ndim)]
 
     # Precompute how indices are partitioned.
     partitioned_indices = [[] for _ in range(X.ndim)]
@@ -182,7 +192,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
                         design_matrix[j] = np.multiply(design_matrix[j], factor_row)
                     response[j] = X[tensor_index]
 
-                x = solve_least_squares(design_matrix, response)
+                x = solve_least_squares(design_matrix, response, L2_REGULARIZATION_STRENGTH)
                 factors[n][i] = x
 
             step_duration = time.time() - start_step_time
@@ -203,6 +213,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     result.sample_ratio = sample_ratio
     result.rank = rank
     result.seed = seed
+    result.l2_regularization_strength = L2_REGULARIZATION_STRENGTH
 
     result.input_shape = X.shape
     result.input_size = X.size
@@ -215,15 +226,15 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     result.test_losses = test_losses
     result.step_times_seconds = running_times
 
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
-    write_dataclass_to_file(result, filename)
+    if USE_CACHING:
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        write_dataclass_to_file(result, filename)
     return result
 
 
 def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
-    NUM_ITERATIONS = 10
-    NUM_RICHARDSON_ITERATIONS = 100
+    NUM_RICHARDSON_ITERATIONS = 10
 
     assert output_path[-1] == '/'
 
@@ -235,7 +246,7 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     filename += 'seed-' + str(seed)
     filename += '.txt'
 
-    if os.path.exists(filename):
+    if USE_CACHING and os.path.exists(filename):
         result = read_cp_completion_solve_result_from_file(filename)
         assert result.num_iterations >= NUM_ITERATIONS
         return result
@@ -250,13 +261,12 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     init_start_time = time.time()
 
     np.random.seed(seed)
-    factors = [np.random.normal(0, 1, size=(X.shape[n], rank)) for n in range(X.ndim)]
+    factors = [np.random.normal(0, 0.1, size=(X.shape[n], rank)) for n in range(X.ndim)]
     for i, factor in enumerate(factors):
         print('factor', i, factor.shape)
 
     X_vec = tl.base.tensor_to_vec(X)
     y_train = X_vec[train_indices]
-    y_test = X_vec[test_indices]
     del X_vec
 
     init_duration = time.time() - init_start_time
@@ -275,22 +285,32 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
 
             #print(' # dimension:', n)
 
+            print(' - creating design_matrix...')
             design_matrix = tl.tenalg.khatri_rao(factors, skip_matrix=n)
-            tmp = np.linalg.pinv(design_matrix.T @ design_matrix)
+            print(' - computing gram matrix...')
+            # TODO: Take advantage of structure here.
+            d = design_matrix.shape[1]
+            tmp = np.linalg.pinv(design_matrix.T @ design_matrix + L2_REGULARIZATION_STRENGTH * np.identity(d))
             #print(' * design_matrix.shape', design_matrix.shape)
  
             for j in range(NUM_RICHARDSON_ITERATIONS):
-                y_vec = tl.tenalg.khatri_rao(factors).sum(axis=1)
+                print(' - richardson step:', j)
+                print('   * computing y_vec...')
+                y_vec = cp_factors_to_cp_vec(factors)
                 y_vec[train_indices] = y_train
                 #print(' * y_vec.shape:', y_vec.shape)
+                print('   * computing Y...')
                 Y = tl.base.vec_to_tensor(y_vec, X.shape)
                 #print(' * Y.shape:', Y.shape)
+                print('   * computing Y_unfolded_n ...')
                 Y_unfolded_n = tl.base.unfold(Y, n)
                 #print(' * Y_unfolded_n.shape:', Y_unfolded_n.shape)
                 #print(' * factors[n].shape:', factors[n].shape)
 
                 # Structured solve step?
+                print('   * computing tmp2 ...')
                 tmp2 = design_matrix.T @ Y_unfolded_n.T
+                print('   * computing sol...')
                 sol = tmp @ tmp2
                 #print(' *', tmp.shape, tmp2.shape, sol.shape, factors[n].shape)
                 factors[n] = sol.T
@@ -313,6 +333,7 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     result.sample_ratio = sample_ratio
     result.rank = rank
     result.seed = seed
+    result.l2_regularization_strength = L2_REGULARIZATION_STRENGTH
 
     result.input_shape = X.shape
     result.input_size = X.size
@@ -325,8 +346,9 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     result.test_losses = test_losses
     result.step_times_seconds = running_times
 
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
-    write_dataclass_to_file(result, filename)
+    if USE_CACHING:
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        write_dataclass_to_file(result, filename)
     return result
 

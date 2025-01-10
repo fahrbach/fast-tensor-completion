@@ -8,7 +8,6 @@ import tensorly as tl
 
 import time
 
-
 """
 TODO:
     - Add verbose option for each solve
@@ -18,12 +17,12 @@ def main():
     colors = mpl.colormaps['tab10'].colors
 
     data_manager = TensorDataManager()
-    X = data_manager.generate_random_normal(shape=(50, 50, 50))
+    #X = data_manager.generate_random_normal(shape=(50, 50, 50))
     #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=16)
     #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=64)
 
     #X = data_manager.generate_random_tucker(shape=(100, 100, 100), rank=(4, 4, 4))
-    #X = data_manager.load_cardiac_mri()
+    X = data_manager.load_cardiac_mri()
     #X = data_manager.load_hyperspectral()
     output_path = data_manager.output_path
     print('X.shape:', X.shape)
@@ -33,14 +32,40 @@ def main():
     sample_ratio = 0.01
     rank = 8
 
-    print('============ lifted ==========')
-    result = run_lifted_cp_completion(X, sample_ratio, rank, output_path)
-    print('train_losses:', result.train_losses)
-    print('test_losses:', result.test_losses)
     print('============ direct ==========')
     result = run_cp_completion(X, sample_ratio, rank, output_path)
     print('train_losses:', result.train_losses)
     print('test_losses:', result.test_losses)
+    print('solve_times:', result.step_times_seconds)
+    plt.plot(result.train_losses, label='direct', c=colors[0])
+    plt.plot(result.test_losses, linestyle='dashed', c=colors[0])
+
+    print('============ lifted ==========')
+    result = run_lifted_cp_completion(X, sample_ratio, rank, output_path)
+    print('train_losses:', result.train_losses)
+    print('test_losses:', result.test_losses)
+    print('solve_times:', result.step_times_seconds)
+    plt.plot(result.train_losses, label='lifted', c=colors[1])
+    plt.plot(result.test_losses, linestyle='dashed', c=colors[1])
+
+    plt.grid()
+    plt.legend()
+    plt.yscale('log')
+    plt.show()
+
+    return
+
+    # Running times
+    result = run_lifted_cp_completion(X, sample_ratio, rank, output_path)
+    plt.plot(result.step_times_seconds, label='lifted', c=colors[0])
+
+    result = run_cp_completion(X, sample_ratio, rank, output_path)
+    plt.plot(result.step_times_seconds, label='direct', c=colors[1])
+
+    plt.grid()
+    plt.legend()
+    plt.show()
+
     return
 
     # Full sweep. 

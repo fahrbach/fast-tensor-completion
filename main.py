@@ -18,39 +18,38 @@ def main():
 
     data_manager = TensorDataManager()
     #X = data_manager.generate_random_normal(shape=(50, 50, 50))
+    #X = data_manager.generate_random_cp(shape=(50, 50, 50), rank=16)
     #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=16)
-    #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=64)
+    X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=64)
 
     #X = data_manager.generate_random_tucker(shape=(100, 100, 100), rank=(4, 4, 4))
-    X = data_manager.load_cardiac_mri()
+    #X = data_manager.load_cardiac_mri()
     #X = data_manager.load_hyperspectral()
     output_path = data_manager.output_path
     print('X.shape:', X.shape)
     print('X.size:', X.size)
     print(data_manager.output_path)
 
-    sample_ratio = 0.01
+    sample_ratio = 0.05
     rank = 8
 
     print('============ direct ==========')
     result = run_cp_completion(X, sample_ratio, rank, output_path)
-    print('train_losses:', result.train_losses)
-    print('test_losses:', result.test_losses)
     print('solve_times:', result.step_times_seconds)
-    plt.plot(result.train_losses, label='direct', c=colors[0])
-    plt.plot(result.test_losses, linestyle='dashed', c=colors[0])
+    plt.plot(result.train_rres, label='direct', c=colors[0])
+    plt.plot(result.test_rres, linestyle='dashed', c=colors[0])
 
     print('============ lifted ==========')
     result = run_lifted_cp_completion(X, sample_ratio, rank, output_path)
-    print('train_losses:', result.train_losses)
-    print('test_losses:', result.test_losses)
     print('solve_times:', result.step_times_seconds)
-    plt.plot(result.train_losses, label='lifted', c=colors[1])
-    plt.plot(result.test_losses, linestyle='dashed', c=colors[1])
+    plt.plot(result.train_rres, label='lifted', c=colors[1])
+    plt.plot(result.test_rres, linestyle='dashed', c=colors[1])
 
     plt.grid()
     plt.legend()
     plt.yscale('log')
+    #delta = 0.1
+    #plt.ylim([0 - delta, 1 + delta])
     plt.show()
 
     return

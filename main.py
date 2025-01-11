@@ -8,20 +8,42 @@ import tensorly as tl
 
 import time
 
-"""
-TODO:
-    - Add verbose option for each solve
-"""
+
+def run_cp_completion_sweep(X, output_path):
+    sample_ratios = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
+    #sample_ratios = [0.05, 0.10, 0.15, 0.20, 0.25]
+    ranks = [1, 2, 4, 8, 16]
+    for sample_ratio in sample_ratios:
+        for rank in ranks:
+            print('Running... (sample_ratio, rank):', (sample_ratio, rank))
+            result = run_cp_completion(X, sample_ratio, rank, output_path)
+
+def run_lifted_cp_completion_sweep(X, output_path):
+    #sample_ratios = [0.10]
+    #sample_ratios = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
+    sample_ratios = [0.05, 0.10, 0.15, 0.20, 0.25]
+    epsilons = [1, 0.1, 0.01, 0.001]
+    rank = 16
+    for sample_ratio in sample_ratios:
+        for epsilon in epsilons:
+            print('Running... (sample_ratio, epsilon):', (sample_ratio, epsilon))
+            result = run_lifted_cp_completion(X, sample_ratio, rank, output_path, epsilon=epsilon)
+
 def main():
     colors = mpl.colormaps['tab10'].colors
 
     data_manager = TensorDataManager()
     #X = data_manager.generate_random_normal(shape=(50, 50, 50))
-    X = data_manager.generate_random_cp(shape=(50, 50, 50), rank=16)
+    #X = data_manager.generate_random_normal(shape=(100, 100, 100))
+
+    #X = data_manager.generate_random_cp(shape=(50, 50, 50), rank=16)
     #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=16)
     #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=64)
+
+    #X = data_manager.generate_random_tucker(shape=(50, 50, 50), rank=(4, 4, 4))
     #X = data_manager.generate_random_tucker(shape=(100, 100, 100), rank=(4, 4, 4))
-    #X = data_manager.load_cardiac_mri()
+
+    X = data_manager.load_cardiac_mri()
     #X = data_manager.load_hyperspectral()
 
     output_path = data_manager.output_path
@@ -32,7 +54,7 @@ def main():
     """
     sample_ratio = 0.10
     rank = 16
-    epsilon = 0.1
+    epsilon = 1 
 
     print('============ direct ==========')
     result = run_cp_completion(X, sample_ratio, rank, output_path)
@@ -68,14 +90,8 @@ def main():
     return
     """
 
-    # Full sweep. 
-    sample_ratios = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
-    ranks = [1, 2, 4, 8, 16]
-    for sample_ratio in sample_ratios:
-        for rank in ranks:
-            print('(sample_ratio, rank):', (sample_ratio, rank))
-            #result = run_cp_completion(X, sample_ratio, rank, output_path)
-            result = run_lifted_cp_completion(X, sample_ratio, rank, output_path, epsilon=0.001)
+    run_cp_completion_sweep(X, output_path)
+    run_lifted_cp_completion_sweep(X, output_path)
 
 
 main()

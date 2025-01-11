@@ -7,9 +7,10 @@ import os
 import time
 
 # Globals
-USE_CACHING = False
+USE_CACHING = True
 L2_REGULARIZATION_STRENGTH = 0 # 1e-3
 NUM_ITERATIONS = 10
+MAX_NUM_RICHARDSON_ITERATIONS = 1024
 
 
 @dataclasses.dataclass
@@ -29,7 +30,8 @@ class CpCompletionSolveResult:
 
     # Solver settings.
     num_iterations: int = None
-    num_richardson_iterations: int = None
+    max_num_richardson_iterations: int = None
+    num_richardson_iterations: list[int] = None
 
     train_mses: list[float] = None
     train_rres: list[float] = None
@@ -168,6 +170,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     for iteration in range(NUM_ITERATIONS):
         for n in range(X.ndim):
             start_step_time = time.time()
+
             # Update each row of A^{(n)} independently.
             for i in range(X.shape[n]):
                 num_samples = len(partitioned_indices[n][i])
@@ -209,7 +212,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     result.input_shape = X.shape
     result.input_size = X.size
     result.num_train_samples = len(train_indices)
-    result.num_test_samples = len(train_indices)
+    result.num_test_samples = X.size
 
     result.num_iterations = NUM_ITERATIONS
 
@@ -226,9 +229,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     return result
 
 
-def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
-    NUM_RICHARDSON_ITERATIONS = 10
-
+def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon=0.1):
     assert output_path[-1] == '/'
 
     # Check if the solve result has been cached.
@@ -236,7 +237,8 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     filename = output_path
     filename += 'sample_ratio-' + str(sample_ratio) + '_'
     filename += 'rank-' + str(rank) + '_'
-    filename += 'seed-' + str(seed)
+    filename += 'seed-' + str(seed) + '_'
+    filename += 'epsilon-' + str(epsilon)
     filename += '.txt'
 
     if USE_CACHING and os.path.exists(filename):
@@ -246,6 +248,7 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
 
     train_indices = get_train_indices(X, sample_ratio)
 
+    num_richardson_iterations = []
     train_mses = []
     train_rres = []
     test_mses = []
@@ -284,17 +287,28 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
             d = design_matrix.shape[1]
             tmp = np.linalg.pinv(design_matrix.T @ design_matrix + L2_REGULARIZATION_STRENGTH * np.identity(d))
  
-            for j in range(NUM_RICHARDSON_ITERATIONS):
-                print(' - richardson step:', j)
-                y_vec = cp_factors_to_cp_vec(factors)
-                y_vec[train_indices] = y_train
-                Y = tl.base.vec_to_tensor(y_vec, X.shape)
-                Y_unfolded_n = tl.base.unfold(Y, n)
+            richardson_rres = []
+            for j in range(MAX_NUM_RICHARDSON_ITERATIONS):
+                x_hat_vec = cp_factors_to_cp_vec(factors)
+                y_hat = x_hat_vec[train_indices]
+                rre = np.sum((y_hat - y_train)**2) / np.sum(y_train**2)
+                richardson_rres.append(rre)
+                if j == 0:
+                    ratio = 1
+                else:
+                    ratio = 1 - richardson_rres[-1] / richardson_rres[-2]
+                print('   * richardson step:', j, rre, ratio)
+                if ratio < epsilon:
+                    break
+                x_hat_vec[train_indices] = y_train
+                X_hat = tl.base.vec_to_tensor(x_hat_vec, X.shape)
+                X_unfolded_n = tl.base.unfold(X_hat, n)
 
                 # Structured solve step?
-                tmp2 = design_matrix.T @ Y_unfolded_n.T
+                tmp2 = design_matrix.T @ X_unfolded_n.T
                 sol = tmp @ tmp2
                 factors[n] = sol.T
+            num_richardson_iterations.append(len(richardson_rres))
 
             step_duration = time.time() - start_step_time
             step_times.append(step_duration)
@@ -317,10 +331,11 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     result.input_shape = X.shape
     result.input_size = X.size
     result.num_train_samples = len(train_indices)
-    result.num_test_samples = len(train_indices)
+    result.num_test_samples = X.size
 
     result.num_iterations = NUM_ITERATIONS
-    result.num_richardson_iterations: NUM_RICHARDSON_ITERATIONS
+    result.max_num_richardson_iterations = MAX_NUM_RICHARDSON_ITERATIONS
+    result.num_richardson_iterations = num_richardson_iterations
 
     result.train_mses = train_mses
     result.train_rres = train_rres

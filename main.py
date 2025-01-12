@@ -6,8 +6,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorly as tl
 
-import time
-
 
 def run_cp_completion_sweep(X, output_path):
     sample_ratios = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
@@ -18,16 +16,19 @@ def run_cp_completion_sweep(X, output_path):
             print('Running... (sample_ratio, rank):', (sample_ratio, rank))
             result = run_cp_completion(X, sample_ratio, rank, output_path)
 
+
 def run_lifted_cp_completion_sweep(X, output_path):
     #sample_ratios = [0.10]
     #sample_ratios = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
-    sample_ratios = [0.05, 0.10, 0.15, 0.20, 0.25]
-    epsilons = [1, 0.1, 0.01, 0.001]
+    #sample_ratios = [0.05, 0.10, 0.15, 0.20, 0.25]
+    sample_ratios = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    epsilons = [0.1, 0.01, 0.001, 0.0001]
     rank = 16
     for sample_ratio in sample_ratios:
         for epsilon in epsilons:
             print('Running... (sample_ratio, epsilon):', (sample_ratio, epsilon))
             result = run_lifted_cp_completion(X, sample_ratio, rank, output_path, epsilon=epsilon)
+
 
 def main():
     colors = mpl.colormaps['tab10'].colors
@@ -54,7 +55,7 @@ def main():
     """
     sample_ratio = 0.10
     rank = 16
-    epsilon = 1 
+    epsilon = 0.01
 
     print('============ direct ==========')
     result = run_cp_completion(X, sample_ratio, rank, output_path)
@@ -67,6 +68,7 @@ def main():
     print('solve_times:', result.step_times_seconds)
     plt.plot(result.train_rres, label='lifted', c=colors[1])
     plt.plot(result.test_rres, linestyle='dashed', c=colors[1])
+    return
 
     plt.grid()
     plt.legend()

@@ -153,7 +153,6 @@ def plot_cp_completion_sweep(X, cache_dir):
     # -------------------------------------------------------------------------------------------
     rank = 16
     sample_ratios = [0.02, 0.04, 0.06, 0.08, 0.10]
-    #sample_ratios = [0.05, 0.10, 0.15, 0.20, 0.25]
 
     # Plot 8: step vs train loss (fixed rank)
     for i, sample_ratio in enumerate(sample_ratios):
@@ -213,7 +212,7 @@ def plot_lifted_comparison(X, cache_dir):
 
     sample_ratio = 0.10
     rank = 16
-    epsilons = [1, 0.1, 0.01, 0.001]
+    epsilons = [0.1, 0.01, 0.001, 0.0001]
 
     # Plot 1: step vs loss (fixed value of epsilon)
 
@@ -251,6 +250,7 @@ def plot_lifted_comparison(X, cache_dir):
 
     plt.xlabel('step')
     plt.ylabel('solve time (s)')
+    #plt.yscale('log')
     plt.title('Lifted CP completion (' + str(sample_ratio) + ', ' + str(rank) + ')')
     plt.grid()
     plt.legend()
@@ -260,7 +260,8 @@ def plot_lifted_comparison(X, cache_dir):
 
     # Plot 3: sample ratio vs runtime (fixed value of epsilon)
     #sample_ratios = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
-    sample_ratios = [0.05, 0.10, 0.15, 0.20, 0.25]
+    #sample_ratios = [0.05, 0.10, 0.15, 0.20, 0.25]
+    sample_ratios = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
     for i, epsilon in enumerate(epsilons):
         y_values = []
         for sample_ratio in sample_ratios:
@@ -277,12 +278,14 @@ def plot_lifted_comparison(X, cache_dir):
 
     plt.xlabel('sample ratio')
     plt.ylabel('solve time (s)')
+    #plt.yscale('log')
     plt.title('Lifted CP completion (' + str(sample_ratio) + ', ' + str(rank) + ')')
     plt.grid()
     plt.legend()
     filename = figure_dir + 'step_vs_solve-time_2.png'
     plt.savefig(filename, transparent=True, bbox_inches='tight', dpi=256)
     plt.show()
+
 
 def main():
     print('Making plots...')
@@ -296,10 +299,10 @@ def main():
     #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=16)
     #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=64)
 
-    X = data_manager.generate_random_tucker(shape=(50, 50, 50), rank=(4, 4, 4))
+    #X = data_manager.generate_random_tucker(shape=(50, 50, 50), rank=(4, 4, 4))
     #X = data_manager.generate_random_tucker(shape=(100, 100, 100), rank=(4, 4, 4))
 
-    #X = data_manager.load_cardiac_mri()
+    X = data_manager.load_cardiac_mri()
     #X = data_manager.load_hyperspectral()
     print('X.shape:', X.shape)
     print('X.size:', X.size)
@@ -307,6 +310,7 @@ def main():
 
     plot_cp_completion_sweep(X, data_manager.output_path)
     plot_lifted_comparison(X, data_manager.output_path)
+
 
 main()
 

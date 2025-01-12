@@ -85,20 +85,29 @@ def cp_factors_to_cp_vec(factors):
     return tl.tenalg.khatri_rao(factors).sum(axis=1)
 
 
-def compute_cp_errors(factors, x_vec, train_indices):
+def compute_cp_errors(factors, train_indices, x_vec, y_vec, x_norm_squared, y_norm_squared):
+    """
+    Use precomputed values of the following since this function is called in each ALS update:
+        - x_vec: vec(X)
+        - y_vec: vec(X[train_indices])
+        - x_norm_squared: np.sum(x_vec**2)
+        - y_norm_squared: np.sum(y_vec**2)
+    """
     x_hat_vec = cp_factors_to_cp_vec(factors)
 
     # Compute train errors
-    y_vec = x_vec[train_indices]
+    #y_vec = x_vec[train_indices]
     y_hat_vec = x_hat_vec[train_indices]
     num = np.sum((y_vec - y_hat_vec)**2)
     train_mse = num / y_vec.size
-    train_rre = num / np.sum(y_vec**2)
+    #train_rre = num / np.sum(y_vec**2)
+    train_rre = num / y_norm_squared
 
     # Compute test errors
     num = np.sum((x_vec - x_hat_vec)**2)
     test_mse = num / x_vec.size
-    test_rre = num / np.sum(x_vec**2)
+    #test_rre = num / np.sum(x_vec**2)
+    test_rre = num / x_norm_squared
 
     return train_mse, train_rre, test_mse, test_rre
 
@@ -134,17 +143,21 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
         assert result.num_iterations >= NUM_ITERATIONS
         return result
 
-    train_indices = get_train_indices(X, sample_ratio)
+    # Initialization.
+    init_start_time = time.time()
 
     train_mses = []
     train_rres = []
     test_mses = []
     test_rres = []
     step_times = []  # Ignores loss computations.
-    x_vec = tl.base.tensor_to_vec(X)
 
-    # Initialization.
-    init_start_time = time.time()
+    # Precompute constants used in error computations.
+    train_indices = get_train_indices(X, sample_ratio)
+    x_vec = tl.base.tensor_to_vec(X)
+    y_vec = x_vec[train_indices]
+    x_norm_squared = np.sum(x_vec**2)
+    y_norm_squared = np.sum(y_vec**2)
 
     np.random.seed(seed)
     factors = [np.random.normal(0, 0.1, size=(X.shape[n], rank)) for n in range(X.ndim)]
@@ -160,7 +173,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     init_duration = time.time() - init_start_time
     step_times.append(init_duration)
     
-    train_mse, train_rre, test_mse, test_rre = compute_cp_errors(factors, x_vec, train_indices)
+    train_mse, train_rre, test_mse, test_rre = compute_cp_errors(factors, train_indices, x_vec, y_vec, x_norm_squared, y_norm_squared)
     train_mses.append(train_mse)
     train_rres.append(train_rre)
     test_mses.append(test_mse)
@@ -194,7 +207,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
             step_duration = time.time() - start_step_time
             step_times.append(step_duration)
 
-            train_mse, train_rre, test_mse, test_rre = compute_cp_errors(factors, x_vec, train_indices)
+            train_mse, train_rre, test_mse, test_rre = compute_cp_errors(factors, train_indices, x_vec, y_vec, x_norm_squared, y_norm_squared)
             train_mses.append(train_mse)
             train_rres.append(train_rre)
             test_mses.append(test_mse)
@@ -230,6 +243,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
 
 
 def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon=0.1):
+    use_acceleration = False
     assert output_path[-1] == '/'
 
     # Check if the solve result has been cached.
@@ -239,6 +253,8 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
     filename += 'rank-' + str(rank) + '_'
     filename += 'seed-' + str(seed) + '_'
     filename += 'epsilon-' + str(epsilon)
+    if use_acceleration:
+        filename += '_accelerated'
     filename += '.txt'
 
     if USE_CACHING and os.path.exists(filename):
@@ -246,7 +262,8 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
         assert result.num_iterations >= NUM_ITERATIONS
         return result
 
-    train_indices = get_train_indices(X, sample_ratio)
+    # Initialization.
+    init_start_time = time.time()
 
     num_richardson_iterations = []
     train_mses = []
@@ -255,21 +272,20 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
     test_rres = []
     step_times = []  # Ignores loss computations.
 
-    # Initialization.
-    init_start_time = time.time()
-
     np.random.seed(seed)
     factors = [np.random.normal(0, 0.1, size=(X.shape[n], rank)) for n in range(X.ndim)]
-    for i, factor in enumerate(factors):
-        print('factor', i, factor.shape)
 
+    # Precompute constants used in error computations.
+    train_indices = get_train_indices(X, sample_ratio)
     x_vec = tl.base.tensor_to_vec(X)
-    y_train = x_vec[train_indices]
+    y_vec = x_vec[train_indices]
+    x_norm_squared = np.sum(x_vec**2)
+    y_norm_squared = np.sum(y_vec**2)
 
     init_duration = time.time() - init_start_time
     step_times.append(init_duration)
 
-    train_mse, train_rre, test_mse, test_rre = compute_cp_errors(factors, x_vec, train_indices)
+    train_mse, train_rre, test_mse, test_rre = compute_cp_errors(factors, train_indices, x_vec, y_vec, x_norm_squared, y_norm_squared)
     train_mses.append(train_mse)
     train_rres.append(train_rre)
     test_mses.append(test_mse)
@@ -280,40 +296,45 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
         for n in range(X.ndim):
             start_step_time = time.time()
 
-            print(' - creating design_matrix...')
-            design_matrix = tl.tenalg.khatri_rao(factors, skip_matrix=n)
-            print(' - computing gram matrix...')
             # TODO: Take advantage of structure here.
+            design_matrix = tl.tenalg.khatri_rao(factors, skip_matrix=n)
             d = design_matrix.shape[1]
-            tmp = np.linalg.pinv(design_matrix.T @ design_matrix + L2_REGULARIZATION_STRENGTH * np.identity(d))
+            gram_inv = np.linalg.pinv(design_matrix.T @ design_matrix + L2_REGULARIZATION_STRENGTH * np.identity(d))
  
             richardson_rres = []
+
             for j in range(MAX_NUM_RICHARDSON_ITERATIONS):
                 x_hat_vec = cp_factors_to_cp_vec(factors)
                 y_hat = x_hat_vec[train_indices]
-                rre = np.sum((y_hat - y_train)**2) / np.sum(y_train**2)
+                rre = np.sum((y_hat - y_vec)**2) / y_norm_squared
                 richardson_rres.append(rre)
                 if j == 0:
                     ratio = 1
+                    alpha = 0
                 else:
                     ratio = 1 - richardson_rres[-1] / richardson_rres[-2]
-                print('   * richardson step:', j, rre, ratio)
+                    alpha = richardson_rres[-1] / richardson_rres[-2]
+                print('   * richardson step:', j, rre, ratio, alpha, 1 / (1 - alpha))
                 if ratio < epsilon:
                     break
-                x_hat_vec[train_indices] = y_train
+                x_hat_vec[train_indices] = y_vec
                 X_hat = tl.base.vec_to_tensor(x_hat_vec, X.shape)
                 X_unfolded_n = tl.base.unfold(X_hat, n)
 
                 # Structured solve step?
-                tmp2 = design_matrix.T @ X_unfolded_n.T
-                sol = tmp @ tmp2
-                factors[n] = sol.T
+                tmp = design_matrix.T @ X_unfolded_n.T
+                sol = gram_inv @ tmp
+                if j >= 1 and use_acceleration:
+                    tmp3 = (sol.T - factors[n])*(1 / (1 - alpha)) + factors[n]
+                    factors[n] = tmp3
+                else:
+                    factors[n] = sol.T
             num_richardson_iterations.append(len(richardson_rres))
 
             step_duration = time.time() - start_step_time
             step_times.append(step_duration)
 
-            train_mse, train_rre, test_mse, test_rre = compute_cp_errors(factors, x_vec, train_indices)
+            train_mse, train_rre, test_mse, test_rre = compute_cp_errors(factors, train_indices, x_vec, y_vec, x_norm_squared, y_norm_squared)
             train_mses.append(train_mse)
             train_rres.append(train_rre)
             test_mses.append(test_mse)

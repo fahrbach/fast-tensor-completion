@@ -57,3 +57,15 @@ class TensorDataManager:
         assert self.tensor.size == 45_416_448
         return self.tensor
 
+    def load_traffic(self):
+        """
+        Paper: "Traffic forecasting in complex urban networks: Leveraging big data and machine learning"
+        Source: https://github.com/florinsch/BigTrafficData
+        """
+        self.input_filename = 'data/traffic/VolumeData_tensor.mat'
+        self.tensor = sio.loadmat(self.input_filename)['data'].astype(float)
+        self.output_path = 'output/traffic/'
+        assert self.tensor.shape == (1084, 2033, 96)
+        assert self.tensor.size == 211_562_112
+        return self.tensor
+

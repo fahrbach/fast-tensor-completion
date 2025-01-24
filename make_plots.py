@@ -302,8 +302,9 @@ def main():
     #X = data_manager.generate_random_tucker(shape=(50, 50, 50), rank=(4, 4, 4))
     #X = data_manager.generate_random_tucker(shape=(100, 100, 100), rank=(4, 4, 4))
 
-    X = data_manager.load_cardiac_mri()
+    #X = data_manager.load_cardiac_mri()
     #X = data_manager.load_hyperspectral()
+    X = data_manager.load_traffic()
     print('X.shape:', X.shape)
     print('X.size:', X.size)
     print('data_manager.output_path:', data_manager.output_path)

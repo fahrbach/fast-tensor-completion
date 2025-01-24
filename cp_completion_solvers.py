@@ -82,8 +82,19 @@ def vec_index_to_tensor_index(vec_index, shape):
 
 
 def cp_factors_to_cp_vec(factors):
-    return tl.tenalg.khatri_rao(factors).sum(axis=1)
-
+    num_elements = 1
+    for n, factor in enumerate(factors):
+        num_elements *= factor.shape[0]
+        rank = factor.shape[1]
+    
+    ans = np.zeros(num_elements)
+    for r in range(rank):
+        tmp = factors[0][:,r].T
+        for n in range(1, len(factors)):
+            tmp = np.kron(tmp, factors[n][:,r].T)
+        ans += tmp
+    return ans
+    #return tl.tenalg.khatri_rao(factors).sum(axis=1)  # Using O(rank) too much memory.
 
 def compute_cp_errors(factors, train_indices, x_vec, y_vec, x_norm_squared, y_norm_squared):
     """
@@ -295,17 +306,25 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
     for iteration in range(NUM_ITERATIONS):
         for n in range(X.ndim):
             start_step_time = time.time()
+            print('- (iteration, n):', (iteration, n))
 
+            #print('         # computing design_matrix...')
             # TODO: Take advantage of structure here.
             design_matrix = tl.tenalg.khatri_rao(factors, skip_matrix=n)
             d = design_matrix.shape[1]
+            #print('         # computing gram_inv...')
             gram_inv = np.linalg.pinv(design_matrix.T @ design_matrix + L2_REGULARIZATION_STRENGTH * np.identity(d))
  
             richardson_rres = []
 
             for j in range(MAX_NUM_RICHARDSON_ITERATIONS):
+                #print('         # computing x_hat_vec...')
+                #start_x_hat_vec_time = time.time()
                 x_hat_vec = cp_factors_to_cp_vec(factors)
+                #stop_x_hat_vec_time = time.time()
+                #print('         # --> total time:', stop_x_hat_vec_time - start_x_hat_vec_time)
                 y_hat = x_hat_vec[train_indices]
+                #print('         # computing rre...')
                 rre = np.sum((y_hat - y_vec)**2) / y_norm_squared
                 richardson_rres.append(rre)
                 if j == 0:
@@ -314,15 +333,22 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
                 else:
                     ratio = 1 - richardson_rres[-1] / richardson_rres[-2]
                     alpha = richardson_rres[-1] / richardson_rres[-2]
-                print('   * richardson step:', j, rre, ratio, alpha, 1 / (1 - alpha))
+                print('   * richardson step:', j, rre, ratio)
                 if ratio < epsilon:
                     break
+                #print('         # updating x_hat_vec[train_indices]...')
                 x_hat_vec[train_indices] = y_vec
+                #print('         # constructing X_hat...')
                 X_hat = tl.base.vec_to_tensor(x_hat_vec, X.shape)
+                del x_hat_vec
+                #print('         # constructing X_unfolded_hat...')
                 X_unfolded_n = tl.base.unfold(X_hat, n)
 
                 # Structured solve step?
+                #print('         # computing tmp...')
                 tmp = design_matrix.T @ X_unfolded_n.T
+                del X_unfolded_n
+                #print('         # computing sol...')
                 sol = gram_inv @ tmp
                 if j >= 1 and use_acceleration:
                     tmp3 = (sol.T - factors[n])*(1 / (1 - alpha)) + factors[n]

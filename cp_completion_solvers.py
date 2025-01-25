@@ -353,7 +353,7 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
                     alpha = 0
                 else:
                     ratio = 1 - richardson_rres[-1] / richardson_rres[-2]
-                    alpha = np.sum((sol.T - factors[n])**2) / np.sum((factors[n] - tmp4)**2)
+                    alpha = np.sqrt(np.sum((sol.T - factors[n])**2) / np.sum((factors[n] - tmp4)**2))
                     print(alpha)
                 if j >= 1 and use_acceleration:
 

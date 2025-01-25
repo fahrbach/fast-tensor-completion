@@ -254,7 +254,7 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
 
 
 def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon=0.1):
-    use_acceleration = False
+    use_acceleration = True
     assert output_path[-1] == '/'
 
     # Check if the solve result has been cached.
@@ -329,10 +329,8 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
                 richardson_rres.append(rre)
                 if j == 0:
                     ratio = 1
-                    alpha = 0
                 else:
                     ratio = 1 - richardson_rres[-1] / richardson_rres[-2]
-                    alpha = richardson_rres[-1] / richardson_rres[-2]
                 print('   * richardson step:', j, rre, ratio)
                 if ratio < epsilon:
                     break
@@ -350,10 +348,21 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
                 del X_unfolded_n
                 #print('         # computing sol...')
                 sol = gram_inv @ tmp
+                if j % 2 == 0:
+                    ratio = 1
+                    alpha = 0
+                else:
+                    ratio = 1 - richardson_rres[-1] / richardson_rres[-2]
+                    alpha = np.sum((sol.T - factors[n])**2) / np.sum((factors[n] - tmp4)**2)
+                    print(alpha)
                 if j >= 1 and use_acceleration:
+
+                    #tmp3 = factors[n] + (sol.T - factors[n])*(1 / (1 - alpha))
                     tmp3 = (sol.T - factors[n])*(1 / (1 - alpha)) + factors[n]
+                    tmp4 = factors[n]
                     factors[n] = tmp3
                 else:
+                    tmp4 = factors[n]
                     factors[n] = sol.T
             num_richardson_iterations.append(len(richardson_rres))
 

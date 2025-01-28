@@ -227,6 +227,11 @@ def plot_lifted_comparison(X, cache_dir):
     plt.plot(result.train_rres, label='direct', c=colors[len(epsilons)])
     plt.plot(result.test_rres, linestyle='dashed', c=colors[len(epsilons)])
 
+    # parafac ALS method
+    result = run_parafac_als(X, sample_ratio, rank, cache_dir)
+    plt.plot(result.train_rres, label='parafac_als', c=colors[len(epsilons)+1])
+    plt.plot(result.test_rres, linestyle='dashed', c=colors[len(epsilons)+1])
+
 
     plt.xlabel('step')
     plt.ylabel('loss')
@@ -247,6 +252,10 @@ def plot_lifted_comparison(X, cache_dir):
     # Direct method
     result = run_cp_completion(X, sample_ratio, rank, cache_dir)
     plt.plot(result.step_times_seconds, label='direct', c=colors[len(epsilons)])
+
+    # parafac ALS method
+    result = run_parafac_als(X, sample_ratio, rank, cache_dir)
+    plt.plot(result.step_times_seconds, label='parafac_als', c=colors[len(epsilons)+1])
 
     plt.xlabel('step')
     plt.ylabel('solve time (s)')
@@ -276,6 +285,13 @@ def plot_lifted_comparison(X, cache_dir):
         y_values.append(np.sum(result.step_times_seconds))
     plt.plot(sample_ratios, y_values, label='direct', c=colors[len(epsilons)], marker='o')
 
+    # parafac als
+    y_values = []
+    for sample_ratio in sample_ratios:
+        result = run_parafac_als(X, sample_ratio, rank, cache_dir)
+        y_values.append(np.sum(result.step_times_seconds))
+    plt.plot(sample_ratios, y_values, label='parafac_als', c=colors[len(epsilons)+1], marker='*')
+
     plt.xlabel('sample ratio')
     plt.ylabel('solve time (s)')
     #plt.yscale('log')
@@ -296,7 +312,7 @@ def main():
     #X = data_manager.generate_random_normal(shape=(100, 100, 100))
 
     #X = data_manager.generate_random_cp(shape=(50, 50, 50), rank=16)
-    #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=16)
+    X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=16)
     #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=64)
 
     #X = data_manager.generate_random_tucker(shape=(50, 50, 50), rank=(4, 4, 4))
@@ -304,7 +320,7 @@ def main():
 
     #X = data_manager.load_cardiac_mri()
     #X = data_manager.load_hyperspectral()
-    X = data_manager.load_traffic()
+    #X = data_manager.load_traffic()
     print('X.shape:', X.shape)
     print('X.size:', X.size)
     print('data_manager.output_path:', data_manager.output_path)

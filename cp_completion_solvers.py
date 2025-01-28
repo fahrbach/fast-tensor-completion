@@ -6,6 +6,8 @@ import datetime
 import os
 import time
 
+from scipy.sparse import coo_matrix, diags
+
 # Globals
 USE_CACHING = True
 L2_REGULARIZATION_STRENGTH = 0 # 1e-3
@@ -253,6 +255,110 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
     return result
 
 
+def run_parafac_als(X, sample_ratio, rank, output_path, seed=0):
+    assert output_path[-1] == '/'
+
+    # Check if the solve result has been cached.
+    output_path += 'parafac_als/'
+    filename = output_path
+    filename += 'sample_ratio-' + str(sample_ratio) + '_'
+    filename += 'rank-' + str(rank) + '_'
+    filename += 'seed-' + str(seed)
+    filename += '.txt'
+
+    if USE_CACHING and os.path.exists(filename):
+        result = read_cp_completion_solve_result_from_file(filename)
+        assert result.num_iterations >= NUM_ITERATIONS
+        return result
+
+    # Initialization.
+    init_start_time = time.time()
+
+    train_mses = []
+    train_rres = []
+    test_mses = []
+    test_rres = []
+    step_times = []  # Ignores loss computations.
+
+    # Precompute constants used in error computations.
+    train_indices = get_train_indices(X, sample_ratio)
+    x_vec = tl.base.tensor_to_vec(X)
+    y_vec = x_vec[train_indices]
+    x_norm_squared = np.sum(x_vec**2)
+    y_norm_squared = np.sum(y_vec**2)
+
+    np.random.seed(seed)
+    factors = [np.random.normal(0, 0.1, size=(X.shape[n], rank)) for n in range(X.ndim)]
+
+    init_duration = time.time() - init_start_time
+    step_times.append(init_duration)
+    
+    train_mse, train_rre, test_mse, test_rre = compute_cp_errors(factors, train_indices, x_vec, y_vec, x_norm_squared, y_norm_squared)
+    train_mses.append(train_mse)
+    train_rres.append(train_rre)
+    test_mses.append(test_mse)
+    test_rres.append(test_rre)
+
+    # Alternating least squares
+    for iteration in range(NUM_ITERATIONS):
+        for n in range(X.ndim):
+            start_step_time = time.time()
+
+            design_matrix = tl.tenalg.khatri_rao(factors, skip_matrix=n)
+            gram_matrix = np.ones((len(factors[0][0]), len(factors[0][0])))
+            for k in range(X.ndim):
+                if k == n:
+                    continue
+                gram_matrix = gram_matrix * (factors[k].T @ factors[k])
+                
+            x_hat_vec = cp_factors_to_cp_vec(factors)
+            x_hat_vec[train_indices] = y_vec
+            X_hat = tl.base.vec_to_tensor(x_hat_vec, X.shape)
+            del x_hat_vec
+            X_unfolded_n = tl.base.unfold(X_hat, n)
+            del X_hat
+
+            x = solve_least_squares(gram_matrix, design_matrix.T @ X_unfolded_n.T, L2_REGULARIZATION_STRENGTH)
+            factors[n] = x.T
+
+            step_duration = time.time() - start_step_time
+            step_times.append(step_duration)
+
+            train_mse, train_rre, test_mse, test_rre = compute_cp_errors(factors, train_indices, x_vec, y_vec, x_norm_squared, y_norm_squared)
+            train_mses.append(train_mse)
+            train_rres.append(train_rre)
+            test_mses.append(test_mse)
+            test_rres.append(test_rre)
+            print(' - (iteration, n):', (iteration, n), '->', train_rre, test_rre)
+
+    # Construct output
+    result = CpCompletionSolveResult()
+
+    result.sample_ratio = sample_ratio
+    result.rank = rank
+    result.seed = seed
+    result.l2_regularization_strength = L2_REGULARIZATION_STRENGTH
+
+    result.input_shape = X.shape
+    result.input_size = X.size
+    result.num_train_samples = len(train_indices)
+    result.num_test_samples = X.size
+
+    result.num_iterations = NUM_ITERATIONS
+
+    result.train_mses = train_mses
+    result.train_rres = train_rres
+    result.test_mses = test_mses
+    result.test_rres = test_rres
+    result.step_times_seconds = step_times
+
+    if USE_CACHING:
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        write_dataclass_to_file(result, filename)
+    return result
+
+
 def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon=0.1):
     use_acceleration = True
     assert output_path[-1] == '/'
@@ -313,7 +419,12 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
             design_matrix = tl.tenalg.khatri_rao(factors, skip_matrix=n)
             d = design_matrix.shape[1]
             #print('         # computing gram_inv...')
-            gram_inv = np.linalg.pinv(design_matrix.T @ design_matrix + L2_REGULARIZATION_STRENGTH * np.identity(d))
+            # gram_inv = np.linalg.pinv(design_matrix.T @ design_matrix + L2_REGULARIZATION_STRENGTH * np.identity(d))
+            gram_matrix = np.ones((len(factors[0][0]), len(factors[0][0])))
+            for k in range(X.ndim):
+                if k == n:
+                    continue
+                gram_matrix = gram_matrix * (factors[k].T @ factors[k])
  
             richardson_rres = []
 
@@ -347,7 +458,8 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
                 tmp = design_matrix.T @ X_unfolded_n.T
                 del X_unfolded_n
                 #print('         # computing sol...')
-                sol = gram_inv @ tmp
+                sol = solve_least_squares(gram_matrix, tmp, L2_REGULARIZATION_STRENGTH)
+                # sol = gram_inv @ tmp
                 if j % 2 == 0:
                     ratio = 1
                     alpha = 0
@@ -404,4 +516,5 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
             os.makedirs(output_path)
         write_dataclass_to_file(result, filename)
     return result
+
 

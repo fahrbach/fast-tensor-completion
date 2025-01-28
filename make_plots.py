@@ -201,7 +201,7 @@ def plot_cp_completion_sweep(X, cache_dir):
     plt.show()
 
 
-def plot_lifted_comparison(X, cache_dir):
+def plot_lifted_comparison(X, cache_dir, use_acceleration=False):
     colors = mpl.colormaps['tab10'].colors
 
     figure_dir = cache_dir + 'figures/lifted-comparison/'
@@ -213,7 +213,6 @@ def plot_lifted_comparison(X, cache_dir):
     sample_ratio = 0.10
     rank = 16
     epsilons = [0.1, 0.01, 0.001, 0.0001]
-    use_acceleration = False
 
     # Plot 1: step vs loss (fixed value of epsilon)
 
@@ -239,7 +238,11 @@ def plot_lifted_comparison(X, cache_dir):
     plt.title('Lifted CP completion (' + str(sample_ratio) + ', ' + str(rank) + ')')
     plt.grid()
     plt.legend()
-    filename = figure_dir + 'step_vs_both-losses.png'
+
+    if use_acceleration:
+        filename = figure_dir + 'step_vs_both-losses_accelerated.png'
+    else:
+        filename = figure_dir + 'step_vs_both-losses.png'
     plt.savefig(filename, transparent=True, bbox_inches='tight', dpi=256)
     plt.show()
 
@@ -263,7 +266,11 @@ def plot_lifted_comparison(X, cache_dir):
     plt.title('Lifted CP completion (' + str(sample_ratio) + ', ' + str(rank) + ')')
     plt.grid()
     plt.legend()
-    filename = figure_dir + 'step_vs_solve-time_1.png'
+
+    if use_acceleration:
+        filename = figure_dir + 'step_vs_solve-time_1_accelerated.png'
+    else:
+        filename = figure_dir + 'step_vs_solve-time_1.png'
     plt.savefig(filename, transparent=True, bbox_inches='tight', dpi=256)
     plt.show()
 
@@ -298,7 +305,10 @@ def plot_lifted_comparison(X, cache_dir):
     plt.title('Lifted CP completion (' + str(sample_ratio) + ', ' + str(rank) + ')')
     plt.grid()
     plt.legend()
-    filename = figure_dir + 'step_vs_solve-time_2.png'
+    if use_acceleration:
+        filename = figure_dir + 'step_vs_solve-time_2_accelerated.png'
+    else:
+        filename = figure_dir + 'step_vs_solve-time_2.png'
     plt.savefig(filename, transparent=True, bbox_inches='tight', dpi=256)
     plt.show()
 
@@ -326,7 +336,8 @@ def main():
     print('data_manager.output_path:', data_manager.output_path)
 
     plot_cp_completion_sweep(X, data_manager.output_path)
-    plot_lifted_comparison(X, data_manager.output_path)
+    plot_lifted_comparison(X, data_manager.output_path, use_acceleration=False)
+    plot_lifted_comparison(X, data_manager.output_path, use_acceleration=True)
 
 
 main()

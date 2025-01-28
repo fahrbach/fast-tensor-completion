@@ -213,12 +213,13 @@ def plot_lifted_comparison(X, cache_dir):
     sample_ratio = 0.10
     rank = 16
     epsilons = [0.1, 0.01, 0.001, 0.0001]
+    use_acceleration = False
 
     # Plot 1: step vs loss (fixed value of epsilon)
 
     # Lifted methods
     for i, epsilon in enumerate(epsilons):
-        result = run_lifted_cp_completion(X, sample_ratio, rank, cache_dir, epsilon=epsilon)
+        result = run_lifted_cp_completion(X, sample_ratio, rank, cache_dir, epsilon=epsilon, use_acceleration=use_acceleration)
         plt.plot(result.train_rres, label='eps: ' + str(epsilon), c=colors[i])
         plt.plot(result.test_rres, linestyle='dashed', c=colors[i])
 
@@ -231,7 +232,6 @@ def plot_lifted_comparison(X, cache_dir):
     result = run_parafac_als(X, sample_ratio, rank, cache_dir)
     plt.plot(result.train_rres, label='parafac_als', c=colors[len(epsilons)+1])
     plt.plot(result.test_rres, linestyle='dashed', c=colors[len(epsilons)+1])
-
 
     plt.xlabel('step')
     plt.ylabel('loss')
@@ -246,7 +246,7 @@ def plot_lifted_comparison(X, cache_dir):
 
     # Plot 2: step vs runtime (fixed value of epsilon)
     for i, epsilon in enumerate(epsilons):
-        result = run_lifted_cp_completion(X, sample_ratio, rank, cache_dir, epsilon=epsilon)
+        result = run_lifted_cp_completion(X, sample_ratio, rank, cache_dir, epsilon=epsilon, use_acceleration=use_acceleration)
         plt.plot(result.step_times_seconds, label='eps: ' + str(epsilon), c=colors[i])
 
     # Direct method
@@ -274,7 +274,7 @@ def plot_lifted_comparison(X, cache_dir):
     for i, epsilon in enumerate(epsilons):
         y_values = []
         for sample_ratio in sample_ratios:
-            result = run_lifted_cp_completion(X, sample_ratio, rank, cache_dir, epsilon=epsilon)
+            result = run_lifted_cp_completion(X, sample_ratio, rank, cache_dir, epsilon=epsilon, use_acceleration=use_acceleration)
             y_values.append(np.sum(result.step_times_seconds))
         plt.plot(sample_ratios, y_values, label='eps: ' + str(epsilon), c=colors[i], marker='x')
 
@@ -308,11 +308,11 @@ def main():
 
     # Set tensor data.
     data_manager = TensorDataManager()
-    #X = data_manager.generate_random_normal(shape=(50, 50, 50))
+    X = data_manager.generate_random_normal(shape=(50, 50, 50))
     #X = data_manager.generate_random_normal(shape=(100, 100, 100))
 
     #X = data_manager.generate_random_cp(shape=(50, 50, 50), rank=16)
-    X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=16)
+    #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=16)
     #X = data_manager.generate_random_cp(shape=(100, 100, 100), rank=64)
 
     #X = data_manager.generate_random_tucker(shape=(50, 50, 50), rank=(4, 4, 4))

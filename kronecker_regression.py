@@ -4,8 +4,12 @@ import time
 
 import matplotlib.pyplot as plt
 import tensorly as tl
+import matplotlib as mpl
 
 from scipy.linalg import solve, sqrtm
+
+L2_REG = 1e-3
+
 
 def comp_lev_scores(A, reg=0):
     """
@@ -34,6 +38,7 @@ def comp_lev_scores(A, reg=0):
     ridge_leverage_scores = np.sum((A @ regularized_AtA_inv) * A, axis=1)
 
     return ridge_leverage_scores
+
 
 def sample_based_on_dist(probs, m):
     """
@@ -88,6 +93,7 @@ def khatri_rao_prod(A, B):
     
     # Reshape C into a matrix of shape (m, n * p)
     return C.reshape(m, n * p)
+
 
 def random_mat_exp(n, d, percentages):
 
@@ -159,7 +165,7 @@ def random_mat_exp(n, d, percentages):
 		p1 = lev1/sum(lev1)
 		p2 = lev2/sum(lev2)
 		s = 200*d*d*(1+int(p/(n*n)*2))
-		print(1+int(p/(n*n)*2))
+		#print(1+int(p/(n*n)*2))
 		while True:
 			k = k + 1
 			ind1 = sample_based_on_dist(p1, s)
@@ -203,6 +209,7 @@ def random_mat_exp(n, d, percentages):
 	return dir_time, lift_time, lev_time, dir_err, lift_err, lev_err,\
 		dir_err_test, lift_err_test, lev_err_test, lift_convergence, lev_convergence
 
+
 def run_exp(n, d, seed):
 	random.seed(seed)
 	np.random.seed(seed)
@@ -241,6 +248,7 @@ def run_exp(n, d, seed):
 		dir_err=dir_err, lift_err=lift_err, lev_err=lev_err,\
 		dir_err_test=dir_err_test, lift_err_test=lift_err_test, lev_err_test=lev_err_test,\
 		lift_convergence=lift_convergence, lev_convergence=lev_convergence, percentages=percentages)
+
 
 def plot_results(n, d, seed):
 
@@ -321,8 +329,301 @@ def plot_results(n, d, seed):
 
 	#plt.show()
 
+
+def run_direct_kron(A, B, b, obs_inds):
+	start = time.time()
+	n = A.shape[0]
+	d = A.shape[1]
+	M = np.kron(B.T, A)
+	sol = np.linalg.lstsq(M[obs_inds], b[obs_inds])
+	x = sol[0]
+	loss = sol[1] / len(obs_inds)
+	end = time.time()
+	test_loss = np.linalg.norm(M @ x - b)**2 / (n*n)
+	return np.reshape(x, (d,d), order='F'), loss, test_loss, end-start
+
+
+def run_lifted_kron(A, B, b, obs_inds, epsilon=0.1):
+	start = time.time()
+	n = A.shape[0]
+	d = A.shape[1]
+	x_lift = np.zeros((d*d))
+	bhat = np.zeros((n*n))
+	k = 0
+	while True:
+		k = k + 1
+		N1 = np.linalg.inv(B @ B.T) @ B
+		N2 = np.linalg.inv(A.T @ A) @ A.T
+		btil = (A @ x_lift.reshape((d,d)).T @ B).T.reshape(n*n)
+		bhat[obs_inds] = b[obs_inds] - btil[obs_inds]
+		x_lift_2 = (N2 @ bhat.reshape((n,n)).T @ N1.T).T.reshape(d*d)
+		if k % 2 == 1:
+			m = np.linalg.norm(x_lift_2)
+			if np.linalg.norm(x_lift_2) < epsilon:
+				break
+			x_lift = x_lift + x_lift_2
+		elif k % 2 == 0:
+			alpha = np.linalg.norm(x_lift_2) / m
+			x_lift = x_lift + x_lift_2 / (1-alpha)
+
+	end = time.time()
+	btil = np.ravel(A @ x_lift.reshape((d,d)).T @ B, order='F')
+	loss = np.linalg.norm(btil[obs_inds] - b[obs_inds])**2 / len(obs_inds)
+	test_loss = np.linalg.norm(btil - b)**2 / (n*n)
+	return np.reshape(x_lift, (d,d), order='F'), loss, test_loss, end-start, k
+
+
+def run_leverage_kron(A, B, b, obs_inds, max_step=5):
+	start = time.time()
+	B = B.T
+	tt = time.time()
+	n = A.shape[0]
+	d = A.shape[1]
+	b_tmp = np.zeros((n*n))
+	b_tmp[obs_inds] = b[obs_inds]
+	x_lev = np.zeros((d*d))
+	k = 0
+	lev1 = comp_lev_scores(B)
+	lev2 = comp_lev_scores(A)
+	p1 = lev1/sum(lev1)
+	p2 = lev2/sum(lev2)
+	s = 200*d*d*(1+int(2*len(obs_inds)/(n*n)))
+	while True:
+		k = k + 1
+		ind1 = sample_based_on_dist(p1, s)
+		ind2 = sample_based_on_dist(p2, s)
+		k_inds = ind1 * n + ind2
+		w = 1/np.sqrt(p1[ind1]*p2[ind2]*s)
+		w_reshaped = w[:, np.newaxis]
+		Z = w_reshaped * khatri_rao_prod(B[ind1], A[ind2])
+		btil = Z @ x_lev
+		is_obs = (b_tmp[k_inds] != 0)
+		bhat = (1-is_obs) * btil + (w * is_obs) * b_tmp[k_inds]
+		temp_sol = np.linalg.lstsq(Z, bhat)
+		x_lev_2 = temp_sol[0]
+		if k % 2 == 1:
+			m = np.linalg.norm(x_lev - x_lev_2)
+			if k > max_step:
+				x_lev = x_lev_2
+				break
+			x_lev = x_lev_2
+		elif k % 2 == 0:
+			alpha = np.linalg.norm(x_lev - x_lev_2) / m
+			x_lev = x_lev + (x_lev_2 - x_lev) / (1-alpha)
+
+	end = time.time()
+	btil = np.ravel(A @ x_lev.reshape((d,d)).T @ B.T, order='F')
+	loss = np.linalg.norm(btil[obs_inds] - b[obs_inds])**2 / len(obs_inds)
+	test_loss = np.linalg.norm(btil - b)**2 / (n*n)
+	return np.reshape(x_lev, (d,d), order='F'), loss, test_loss, end-start, k
+
+
+def run_coupled(A, B, C, D, E, obs_inds, method, num_steps=20):
+	n = A.shape[0]
+	d = A.shape[1]
+	X = np.eye(d)
+	Y = X = np.eye(d)
+
+	times = np.zeros((num_steps*2))
+	train_loss = np.zeros((num_steps*2))
+	test_loss = np.zeros((num_steps*2))
+	num_iters = np.ones((num_steps*2))
+
+	k = 0
+	print(method)
+	for i in range(num_steps):
+		print(k)
+
+		b = np.ravel(E - C @ Y @ D, order='F')
+		
+		if method == "direct":
+			sol = run_direct_kron(A, B, b, obs_inds)
+		elif method == "lifted":
+			sol = run_lifted_kron(A, B, b, obs_inds)
+			num_iters[k] = sol[4]
+		elif method == "leverage":
+			sol = run_leverage_kron(A, B, b, obs_inds)
+			num_iters[k] = sol[4]
+
+		X = sol[0]
+
+		train_loss[k] = sol[1]
+		test_loss[k] = sol[2]
+		times[k] = sol[3]
+		k = k + 1
+
+		print(sol[3])
+		print(k)
+
+		b = np.ravel(E - A @ X @ B, order='F')
+
+		if method == "direct":
+			sol = run_direct_kron(C, D, b, obs_inds)
+		elif method == "lifted":
+			sol = run_lifted_kron(C, D, b, obs_inds)
+			num_iters[k] = sol[4]
+		elif method == "leverage":
+			sol = run_leverage_kron(C, D, b, obs_inds)
+			num_iters[k] = sol[4]
+
+		Y = sol[0]
+
+		train_loss[k] = sol[1]
+		test_loss[k] = sol[2]
+		times[k] = sol[3]
+		k = k + 1
+		print(sol[3])
+
+	return train_loss, test_loss, times, num_iters
+
+
+def run_coupled_exp(seed):
+	n = 2000
+	d = 10
+	num_trial=5
+	num_steps=10
+	random.seed(seed)
+	np.random.seed(seed)
+
+	filename = f"coupled_output_{n}_{d}_{seed}.npz"
+
+	direct_times = np.zeros((num_trial,num_steps*2))
+	direct_train_loss = np.zeros((num_trial,num_steps*2))
+	direct_test_loss = np.zeros((num_trial,num_steps*2))
+	direct_num_iters = np.ones((num_trial,num_steps*2))
+	lifted_times = np.zeros((num_trial,num_steps*2))
+	lifted_train_loss = np.zeros((num_trial,num_steps*2))
+	lifted_test_loss = np.zeros((num_trial,num_steps*2))
+	lifted_num_iters = np.ones((num_trial,num_steps*2))
+	leverage_times = np.zeros((num_trial,num_steps*2))
+	leverage_train_loss = np.zeros((num_trial,num_steps*2))
+	leverage_test_loss = np.zeros((num_trial,num_steps*2))
+	leverage_num_iters = np.ones((num_trial,num_steps*2))
+
+	for i in range(num_trial):
+		A = np.random.rand(n, d)
+		X = np.random.rand(d, d)
+		B = np.random.rand(d, n)
+		C = np.random.rand(n, d)
+		Y = np.random.rand(d, d)
+		D = np.random.rand(d, n)
+		E = A @ X @ B + C @ Y @ D
+
+		b = np.ravel(E - C @ np.eye(d) @ D, order='F').T
+		obs_inds = random.sample(range(n*n), int(0.5*n*n))
+		sol = run_coupled(A, B, C, D, E, obs_inds, "direct", num_steps)
+		direct_train_loss[i] = sol[0]
+		direct_test_loss[i] = sol[1]
+		direct_times[i] = sol[2]
+		direct_num_iters[i] = sol[3]
+
+		sol = run_coupled(A, B, C, D, E, obs_inds, "lifted", num_steps)
+		lifted_train_loss[i] = sol[0]
+		lifted_test_loss[i] = sol[1]
+		lifted_times[i] = sol[2]
+		lifted_num_iters[i] = sol[3]
+
+		sol = run_coupled(A, B, C, D, E, obs_inds, "leverage", num_steps)
+		leverage_train_loss[i] = sol[0]
+		leverage_test_loss[i] = sol[1]
+		leverage_times[i] = sol[2]
+		leverage_num_iters[i] = sol[3]
+
+		direct_times[i] = [sum(direct_times[i][ : j + 1]) for j in range(len(direct_times[i]))]
+		lifted_times[i] = [sum(lifted_times[i][ : j + 1]) for j in range(len(lifted_times[i]))]
+		leverage_times[i] = [sum(leverage_times[i][ : j + 1]) for j in range(len(leverage_times[i]))]
+
+	np.savez(filename, direct_train_loss=direct_train_loss, direct_test_loss=direct_test_loss, direct_times=direct_times,\
+		direct_num_iters=direct_num_iters, lifted_train_loss=lifted_train_loss, lifted_test_loss=lifted_test_loss,\
+		lifted_times=lifted_times, lifted_num_iters=lifted_num_iters, leverage_train_loss=leverage_train_loss,\
+		leverage_test_loss=leverage_test_loss, leverage_times=leverage_times, leverage_num_iters=leverage_num_iters)
+
+	
+def plot_coupled_results(seed):
+	n = 2000
+	d = 10
+
+	filename = f"coupled_output_{n}_{d}_{seed}.npz"
+	colors = mpl.colormaps['tab10'].colors
+
+	loaded_data = np.load(filename)
+
+	direct_train_loss = loaded_data['direct_train_loss']
+	direct_test_loss = loaded_data['direct_test_loss']
+	direct_times = loaded_data['direct_times']
+	direct_num_iters = loaded_data['direct_num_iters']
+
+	lifted_train_loss = loaded_data['direct_train_loss']
+	lifted_test_loss = loaded_data['lifted_test_loss']
+	lifted_times = loaded_data['lifted_times']
+	lifted_num_iters = loaded_data['lifted_num_iter']
+
+	leverage_train_loss = loaded_data['leverage_train_loss']
+	leverage_test_loss = loaded_data['leverage_test_loss']
+	leverage_times = loaded_data['leverage_times']
+	leverage_num_iters = loaded_data['leverage_num_iters']
+
+	dir_t_m = np.mean(direct_times, axis=0)
+	dir_t_s = np.std(direct_times, axis=0)
+	lift_t_m = np.mean(lifted_times, axis=0)
+	lift_t_s = np.std(lifted_times, axis=0)
+	lev_t_m = np.mean(leverage_times, axis=0)
+	lev_t_s = np.std(leverage_times, axis=0)
+
+	dir_err_m = np.mean(direct_test_loss, axis=0)
+	dir_err_s = np.std(direct_test_loss, axis=0)
+	lift_err_m = np.mean(lifted_test_loss, axis=0)
+	lift_err_s = np.std(lifted_test_loss, axis=0)
+	lev_err_m = np.mean(leverage_test_loss, axis=0)
+	lev_err_s = np.std(leverage_test_loss, axis=0)
+
+	ts = np.arange(1,num_steps*2+1)
+	f1 = plt.figure(1)
+
+	plt.plot(ts, dir_t_m, label = "direct", color=colors[0])
+	plt.fill_between(ts, dir_t_m - dir_t_s, dir_t_m + dir_t_s, color=colors[0], alpha=0.2)
+
+	plt.plot(ts, lift_t_m, '--', label = "mini-als", color=colors[1])
+	plt.fill_between(ts, lift_t_m - lift_t_s, lift_t_m + lift_t_s, color=colors[1], alpha=0.2)
+
+	plt.plot(ts, lev_t_m, '-.', label = "approximate-mini-als", color=colors[2])
+	plt.fill_between(ts, lev_t_m - lev_t_s, lev_t_m + lev_t_s, color=colors[2], alpha=0.2)
+
+	plt.ylabel("total running time (s)")
+	plt.xlabel("ALS step")
+	plt.legend(loc='upper right')
+	plt.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+
+	plt.savefig("time_comparison_plot_coupled.png", dpi=512, bbox_inches="tight", transparent=True)
+
+	f2 = plt.figure(2)
+
+	plt.plot(ts, dir_err_m, label = "direct", color=colors[0])
+	# plt.fill_between(ts, dir_err_m - dir_err_s, dir_err_m + dir_err_s, color=colors[0], alpha=0.2)
+
+	plt.plot(ts, lift_err_m, '--', label = "mini-als", color=colors[1])
+	# plt.fill_between(ts, lift_err_m - lift_err_s, lift_err_m + lift_err_s, color=colors[1], alpha=0.2)
+
+	plt.plot(ts, lev_err_m, '-.', label = "approximate-mini-als", color=colors[2])
+	# plt.fill_between(ts, lev_err_m - lev_err_s, lev_err_m + lev_err_s, color=colors[2], alpha=0.2)
+
+	plt.ylabel("MSE")
+	plt.xlabel("ALS step")
+	plt.legend(loc='upper right')
+	plt.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+
+	plt.show()
+
+	plt.savefig("error_comparison_plot_coupled.png", dpi=512, bbox_inches="tight", transparent=True)
+
+
 n = 2000
 d = 10
 seed=12345
+num_trial=5
+num_steps=10
 #run_exp(n, d, seed)
-plot_results(n, d, seed)
+#plot_results(n, d, seed)
+#run_coupled_exp(seed)
+plot_coupled_results(seed)
+

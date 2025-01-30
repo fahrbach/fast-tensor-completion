@@ -6,8 +6,6 @@ import datetime
 import os
 import time
 
-from scipy.sparse import coo_matrix, diags
-
 # Globals
 USE_CACHING = True
 L2_REGULARIZATION_STRENGTH = 0 # 1e-3
@@ -256,6 +254,10 @@ def run_cp_completion(X, sample_ratio, rank, output_path, seed=0):
 
 
 def run_parafac_als(X, sample_ratio, rank, output_path, seed=0):
+    """
+    Reference:
+    Tomasi, Giorgio, and Rasmus Bro. "PARAFAC and missing values." Chemometrics and Intelligent Laboratory Systems 75.2 (2005): 163-180.
+    """
     assert output_path[-1] == '/'
 
     # Check if the solve result has been cached.
@@ -359,8 +361,7 @@ def run_parafac_als(X, sample_ratio, rank, output_path, seed=0):
     return result
 
 
-def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon=0.1):
-    use_acceleration = True
+def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon=0.1, use_acceleration=False):
     assert output_path[-1] == '/'
 
     # Check if the solve result has been cached.
@@ -419,12 +420,7 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
             design_matrix = tl.tenalg.khatri_rao(factors, skip_matrix=n)
             d = design_matrix.shape[1]
             #print('         # computing gram_inv...')
-            # gram_inv = np.linalg.pinv(design_matrix.T @ design_matrix + L2_REGULARIZATION_STRENGTH * np.identity(d))
-            gram_matrix = np.ones((len(factors[0][0]), len(factors[0][0])))
-            for k in range(X.ndim):
-                if k == n:
-                    continue
-                gram_matrix = gram_matrix * (factors[k].T @ factors[k])
+            gram_inv = np.linalg.pinv(design_matrix.T @ design_matrix + L2_REGULARIZATION_STRENGTH * np.identity(d))
  
             richardson_rres = []
 
@@ -458,8 +454,7 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
                 tmp = design_matrix.T @ X_unfolded_n.T
                 del X_unfolded_n
                 #print('         # computing sol...')
-                sol = solve_least_squares(gram_matrix, tmp, L2_REGULARIZATION_STRENGTH)
-                # sol = gram_inv @ tmp
+                sol = gram_inv @ tmp
                 if j % 2 == 0:
                     ratio = 1
                     alpha = 0
@@ -516,5 +511,4 @@ def run_lifted_cp_completion(X, sample_ratio, rank, output_path, seed=0, epsilon
             os.makedirs(output_path)
         write_dataclass_to_file(result, filename)
     return result
-
 

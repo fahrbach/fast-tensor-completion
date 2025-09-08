@@ -38,6 +38,9 @@ class TensorDataManager:
 
 
     def load_cardiac_mri(self):
+        """
+        https://jtl.lassonde.yorku.ca/software/datasets/
+        """
         self.input_filename = 'data/cardiac-mri/sol_yxzt_pat1.mat'
         self.tensor = sio.loadmat(self.input_filename)['sol_yxzt'].astype(float)
         self.output_path = 'output/cardiac-mri/'

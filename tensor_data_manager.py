@@ -39,7 +39,8 @@ class TensorDataManager:
 
     def load_cardiac_mri(self):
         """
-        https://jtl.lassonde.yorku.ca/software/datasets/
+        Paper: "Efficient and Generalizable Statistical Models of Shape and Appearance for Analysis of Cardiac MRI"
+        Source: https://jtl.lassonde.yorku.ca/software/datasets/
         """
         self.input_filename = 'data/cardiac-mri/sol_yxzt_pat1.mat'
         self.tensor = sio.loadmat(self.input_filename)['sol_yxzt'].astype(float)
